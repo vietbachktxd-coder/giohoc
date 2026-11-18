@@ -11,7 +11,7 @@ const WD = ['', 'Thứ 2', 'Thứ 3', 'Thứ 4', 'Thứ 5', 'Thứ 6', 'Thứ 7'
 const MODE = { gio: 'Theo giờ', buoi: 'Theo buổi', thang: 'Trọn gói tháng' };
 const COLORS = ['#e11d48', '#2563eb', '#16a34a', '#d97706', '#7c3aed', '#0891b2', '#db2777', '#65a30d'];
 
-const S = { token: LS.get('token', ''), me: LS.get('me', null), demo: LS.get('demo', false), tab: LS.get('tab', 'home'),
+const S = { token: LS.get('token', '') || sessionStorage.getItem('gh_token') || '', me: LS.get('me', null), demo: LS.get('demo', false), tab: LS.get('tab', 'home'),
   month: '', data: null, bill: null, sum: null, pos: null, filter: { c: '', s: '', day: '' }, logView: 'list', timer: null };
 
 const h = s => String(s == null ? '' : s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
@@ -73,13 +73,15 @@ function viewLogin() {
   const noServer = !apiUrl();
   $('#app').innerHTML = `<div class="login">
     <div class="logo"><img src="icons/icon-192.png" alt=""><h1>Giờ học</h1><div class="mu">Điểm danh · Theo dõi giờ học · Tính học phí</div></div>
-    <div class="card">
-      <label>Tên đăng nhập</label><input id="u" autocomplete="username" autocapitalize="off" value="${h(LS.get('lastUser', ''))}">
-      <label>Mật khẩu</label><input id="pw" type="password" autocomplete="current-password">
-      <div style="height:14px"></div>
-      <button class="btn p big w" id="go">Đăng nhập</button>
+    <form class="card" id="lf" autocomplete="on" onsubmit="return false">
+      <label>Tên đăng nhập</label><input id="u" name="username" autocomplete="username" autocapitalize="off" value="${h(LS.get('lastUser', ''))}">
+      <label>Mật khẩu</label><input id="pw" name="password" type="password" autocomplete="current-password">
+      <label class="chk"><input type="checkbox" id="rem" ${LS.get('remember', true) ? 'checked' : ''}>Ghi nhớ đăng nhập trên máy này</label>
+      <div style="height:8px"></div>
+      <button class="btn p big w" id="go" type="submit">Đăng nhập</button>
+      <button class="btn o w" id="reg" type="button" style="margin-top:8px">📝 Đăng ký tài khoản mới</button>
       ${noServer ? '<div class="info">Chưa nối máy chủ. Bấm <b>Dùng thử</b> để xem phần mềm với dữ liệu mẫu.</div>' : ''}
-    </div>
+    </form>
     <div class="row" style="justify-content:space-between">
       <button class="btn o s" id="demo">👀 Dùng thử (dữ liệu mẫu)</button>
       <button class="btn o s" id="srv">⚙ Máy chủ</button>
@@ -92,7 +94,23 @@ function viewLogin() {
     if (!apiUrl() && !S.demo) return toast('Chưa có địa chỉ máy chủ. Bấm ⚙ Máy chủ hoặc Dùng thử.', 'er');
     busy($('#go'), true); const r = await api('login', { username: u, password: pw }); busy($('#go'), false);
     if (!r.ok) return toast(r.error, 'er');
-    LS.set('lastUser', u); setLogin(r);
+    LS.set('lastUser', u); LS.set('remember', $('#rem').checked);
+    try { if (window.PasswordCredential && $('#rem').checked) navigator.credentials.store(new PasswordCredential({ id: u, password: pw, name: r.me.name })); } catch (e) { }
+    setLogin(r);
+  };
+  $('#reg').onclick = () => {
+    if (!apiUrl() && !S.demo) return toast('Chưa có địa chỉ máy chủ', 'er');
+    modal(`${head('Đăng ký tài khoản')}<p class="mu sm">Sau khi đăng ký, phụ huynh (quản trị) duyệt thì đăng nhập được.</p>
+      <label>Bạn là</label><select id="role"><option value="hs">Học sinh</option><option value="gv">Giáo viên</option><option value="ph">Phụ huynh</option></select>
+      <label>Họ tên</label><input id="name"><label>Số điện thoại</label><input id="phone" inputmode="tel">
+      <label>Tên đăng nhập (không dấu, không cách)</label><input id="username" autocapitalize="off" autocomplete="username">
+      <label>Mật khẩu (≥ 6 ký tự)</label><input id="password" type="password" autocomplete="new-password">
+      <div style="height:12px"></div><button class="btn p w" id="sv">Gửi đăng ký</button>`, el => {
+      el.querySelector('#sv').onclick = async e => {
+        busy(e.target, true); const r = await api('register', { role: val(el, 'role'), name: val(el, 'name'), phone: val(el, 'phone'), username: val(el, 'username'), password: val(el, 'password') }); busy(e.target, false);
+        if (!r.ok) return toast(r.error, 'er'); closeModal(); toast(r.msg, 'ok'); $('#u').value = val(el, 'username');
+      };
+    });
   };
   $('#go').onclick = go; $('#pw').onkeydown = e => { if (e.key === 'Enter') go(); };
   $('#demo').onclick = async () => { S.demo = true; LS.set('demo', true); const r = await api('login', { username: 'admin', password: '123456' }); if (r.ok) { setLogin(r); toast('Đang dùng thử — dữ liệu chỉ lưu trên máy này'); } };
@@ -104,14 +122,15 @@ function viewLogin() {
   });
 }
 function setLogin(r) {
-  S.token = r.token; S.me = r.me; LS.set('token', r.token); LS.set('me', r.me); LS.set('demo', S.demo);
+  S.token = r.token; S.me = r.me; LS.set('me', r.me); LS.set('demo', S.demo);
+  if (LS.get('remember', true)) LS.set('token', r.token); else { LS.del('token'); sessionStorage.setItem('gh_token', r.token); }
   S.tab = 'home'; start();
   if (r.me.mustChange) setTimeout(() => changePass(true), 400);
 }
 async function logout(silent) {
   if (!silent && S.token) api('logout');
   if (NATIVE) try { Native.clearSession(); } catch (e) { }
-  S.token = ''; S.me = null; S.data = null; LS.del('token'); LS.del('me');
+  S.token = ''; S.me = null; S.data = null; LS.del('token'); LS.del('me'); sessionStorage.removeItem('gh_token');
   if (S.demo) { S.demo = false; LS.set('demo', false); }
   closeModal(); viewLogin();
 }
@@ -400,13 +419,14 @@ function ttForm(t) {
   const st = myStudents();
   modal(`${head(t.id ? 'Sửa tiết học' : 'Thêm tiết chính khóa')}
     ${st.length > 1 ? `<label>Học sinh</label><select id="sid">${st.map(s => `<option value="${s.id}" ${s.id === t.studentId ? 'selected' : ''}>${h(s.name)}</option>`).join('')}</select>` : `<input type="hidden" id="sid" value="${t.studentId}">`}
-    <div class="g2"><div><label>Thứ</label><select id="d">${[1, 2, 3, 4, 5, 6, 7].map(d => `<option value="${d}" ${+t.d === d ? 'selected' : ''}>${WD[d]}</option>`).join('')}</select></div><div><label>Môn học</label><input id="subject" value="${h(t.subject || '')}"></div></div>
+    <div class="g2"><div><label>Thứ</label><select id="d">${[1, 2, 3, 4, 5, 6, 7].map(d => `<option value="${d}" ${+t.d === d ? 'selected' : ''}>${WD[d]}</option>`).join('')}</select></div><div><label>Môn học</label><input id="subject" list="subjL" value="${h(t.subject || '')}"><datalist id="subjL">${(S.data.subjects || []).map(m => `<option value="${h(m.name)}">`).join('')}</datalist></div></div>
     <div class="g2"><div><label>Bắt đầu</label><input id="start" type="time" value="${t.start}"></div><div><label>Kết thúc</label><input id="end" type="time" value="${t.end}"></div></div>
     <div class="g2"><div><label>Giáo viên</label><input id="teacher" value="${h(t.teacher || '')}"></div><div><label>Phòng / lớp</label><input id="room" value="${h(t.room || '')}"></div></div>
     <label>Ghi chú</label><input id="note" value="${h(t.note || '')}">
     ${t.id ? '' : '<label class="chk"><input type="checkbox" id="rep">Lặp lại cho các ngày Thứ 2 – Thứ 6</label>'}
     <div style="height:12px"></div><div class="row">${t.id ? '<button class="btn er" id="del">Xóa</button>' : ''}<button class="btn p f" id="sv">Lưu</button></div>`, el => {
-    el.querySelector('#sv').onclick = async e => {
+    el.querySelector('#subject').onchange = () => { const m = (S.data.subjects || []).find(z => z.name === val(el, 'subject')); if (m) { if (!val(el, 'teacher')) el.querySelector('#teacher').value = m.teacher || ''; if (!val(el, 'room')) el.querySelector('#room').value = m.room || ''; } };
+  el.querySelector('#sv').onclick = async e => {
       const x = { id: t.id, studentId: val(el, 'sid'), d: +val(el, 'd'), subject: val(el, 'subject'), start: val(el, 'start'), end: val(el, 'end'), teacher: val(el, 'teacher'), room: val(el, 'room'), note: val(el, 'note') };
       const days = val(el, 'rep') ? [1, 2, 3, 4, 5] : [x.d];
       busy(e.target, true);
@@ -654,8 +674,19 @@ function exportCsv(B) {
 function vMore() {
   const ph = S.me.role === 'ph';
   let html = `<div class="card row"><div class="f"><b>${h(S.me.name)}</b><div class="mu">${ROLE[S.me.role]} · ${h(S.me.username)}</div></div></div>`;
+  if (ph) {
+    const steps = [[S.data.students.some(x => x.name !== 'Con'), '1. Học sinh (tên, trường)', 'mStud'], [(S.data.subjects || []).length > 0, '2. Danh mục môn học', 'mSub'],
+      [(S.data.timetable || []).length > 0, '3. Thời khóa biểu chính khóa', 'mTT'], [S.data.courses.some(c => +c.rate || +c.monthlyFee), '4. Lớp học thêm: đơn giá, lịch học', 'mCourse'],
+      [S.data.users.length > 1, '5. Tài khoản cho thầy cô, con', 'mUser']];
+    if (steps.some(x => !x[0])) html += `<div class="card"><h3>🚀 Thiết lập ban đầu</h3>${steps.map(x => `<div class="item" data-go="${x[2]}" style="cursor:pointer"><span>${x[0] ? '✅' : '⬜'}</span><span class="f">${x[1]}</span>›</div>`).join('')}</div>`;
+  }
+  const pend = ph ? S.data.users.filter(u => !u.active && !u.mustChange).length : 0;
+  if (pend) html += `<div class="card warn" id="pend" style="cursor:pointer">🆕 <b>${pend}</b> tài khoản đăng ký mới đang chờ duyệt ›</div>`;
   if (ph) html += `<div class="card"><h3>Quản lý</h3><div class="list-a">
-      <div id="mCourse">📚 <span class="f">Lớp học, lịch học, đơn giá</span><span class="mu">${S.data.courses.length} ›</span></div>
+      <div id="mStud0" style="display:none"></div>
+      <div id="mSub">📘 <span class="f">Môn học (danh mục cho thời khóa biểu)</span><span class="mu">${(S.data.subjects || []).length} ›</span></div>
+      <div id="mTT">🗓 <span class="f">Thời khóa biểu chính khóa</span><span class="mu">${(S.data.timetable || []).length} tiết ›</span></div>
+      <div id="mCourse">📚 <span class="f">Lớp học thêm, lịch học, đơn giá</span><span class="mu">${S.data.courses.length} ›</span></div>
       <div id="mStud">🧒 <span class="f">Học sinh</span><span class="mu">${S.data.students.length} ›</span></div>
       <div id="mUser">👤 <span class="f">Tài khoản (giáo viên, học sinh)</span><span class="mu">${S.data.users.length} ›</span></div>
       <div id="mBak">💾 <span class="f">Sao lưu dữ liệu (JSON)</span></div>
@@ -669,7 +700,8 @@ function vMore() {
     <p class="mu c">Giờ học · giao diện ${APPV}${S.demo ? ' · chế độ dùng thử' : ''}</p>`;
   $('#v').innerHTML = html;
   const on = (id, f) => { const e = $('#' + id); if (e) e.onclick = f; };
-  on('mCourse', courseList); on('mStud', studentList); on('mUser', userList); on('mPass', () => changePass(false)); on('mOut', () => logout());
+  on('mCourse', courseList); on('mSub', subjectList); on('mTT', () => { S.tk = { view: 'week', d: 1, s: '', q: '' }; go('tkb'); }); on('pend', userList);
+  document.querySelectorAll('[data-go]').forEach(x => x.onclick = () => { const e = $('#' + x.dataset.go); if (e) e.click(); }); on('mStud', studentList); on('mUser', userList); on('mPass', () => changePass(false)); on('mOut', () => logout());
   on('mUpd', () => Native.checkUpdate(true)); on('mApk', () => location.href = 'download/');
   on('mReset', async () => { if (await confirmBox('Xóa toàn bộ dữ liệu dùng thử?', 'Xóa')) { DEMO.reset(); logout(true); } });
   on('mBak', async () => { const r = await api('backup'); if (!r.ok) return toast(r.error, 'er'); download('GioHoc_saoluu_' + today() + '.json', JSON.stringify(r.data, null, 1), 'application/json'); });
@@ -735,6 +767,28 @@ function courseForm(c) {
     if (del) del.onclick = async () => { if (!(await confirmBox(`Xóa lớp <b>${h(c.name)}</b>? (Nếu đã có buổi học, lớp chỉ chuyển sang “Ngừng” để giữ lịch sử.)`, 'Xóa'))) return; const r = await api('deleteCourse', { id: c.id }); if (!r.ok) return toast(r.error, 'er'); toast(r.archived ? 'Đã chuyển lớp sang Ngừng' : 'Đã xóa', 'ok'); await reload(); render(); courseList(); };
   });
 }
+function subjectList() {
+  const L = S.data.subjects || [];
+  modal(`${head('Môn học')}<p class="mu sm">Danh mục môn để chọn nhanh khi lập thời khóa biểu (tự điền giáo viên, phòng học).</p>
+    <div class="list-a">${L.map(m => `<div data-m="${m.id}"><span class="bar" style="background:${m.color || '#64748b'};height:28px"></span><div class="f"><b>${h(m.name)}</b><div class="mu">${h([m.teacher, m.room].filter(Boolean).join(' · '))}</div></div>›</div>`).join('') || '<div class="empty">Chưa có môn học</div>'}</div>
+    <div style="height:10px"></div><div class="row"><button class="btn o f" id="quick">⚡ Thêm nhanh môn THCS</button><button class="btn p f" id="nw">＋ Thêm môn</button></div>`, el => {
+    const form = m => modal(`${head(m.id ? 'Sửa môn học' : 'Thêm môn học')}<label>Tên môn</label><input id="name" value="${h(m.name || '')}">
+      <div class="g2"><div><label>Giáo viên</label><input id="teacher" value="${h(m.teacher || '')}"></div><div><label>Phòng học</label><input id="room" value="${h(m.room || '')}"></div></div>
+      <label>Màu</label><input id="color" type="color" value="${m.color || '#64748b'}" style="height:44px;padding:4px"><label>Ghi chú</label><input id="note" value="${h(m.note || '')}">
+      <div style="height:12px"></div><div class="row">${m.id ? '<button class="btn er" id="del">Xóa</button>' : ''}<button class="btn p f" id="sv">Lưu</button></div>`, e2 => {
+      e2.querySelector('#sv').onclick = async () => { const r = await api('saveSubject', { item: { id: m.id, name: val(e2, 'name'), teacher: val(e2, 'teacher'), room: val(e2, 'room'), color: val(e2, 'color'), note: val(e2, 'note') } }); if (!r.ok) return toast(r.error, 'er'); await reload(); subjectList(); };
+      const d = e2.querySelector('#del'); if (d) d.onclick = async () => { await api('deleteSubject', { id: m.id }); await reload(); subjectList(); };
+    });
+    el.querySelectorAll('[data-m]').forEach(d => d.onclick = () => form(L.find(m => m.id === d.dataset.m)));
+    el.querySelector('#nw').onclick = () => form({});
+    el.querySelector('#quick').onclick = async e => {
+      busy(e.target, true);
+      const names = ['Toán', 'Ngữ văn', 'Tiếng Anh', 'Khoa học tự nhiên', 'Lịch sử và Địa lý', 'GDCD', 'Tin học', 'Công nghệ', 'Giáo dục thể chất', 'Nghệ thuật', 'Hoạt động trải nghiệm', 'Chào cờ', 'Sinh hoạt lớp'];
+      for (const [i, n] of names.entries()) if (!L.some(m => m.name === n)) await api('saveSubject', { item: { name: n, color: COLORS[i % COLORS.length] } });
+      await reload(); subjectList(); toast('Đã thêm các môn THCS', 'ok');
+    };
+  });
+}
 function studentList() {
   modal(`${head('Học sinh')}<div class="list-a">${S.data.students.map(s => `<div data-s="${s.id}">🧒 <div class="f"><b>${h(s.name)}</b><div class="mu">${h(s.grade || '')} ${h(s.note || '')}</div></div>›</div>`).join('')}</div>
     <div style="height:10px"></div><button class="btn p w" id="nw">＋ Thêm học sinh</button>`, el => {
@@ -755,7 +809,7 @@ function studentList() {
 }
 function userList() {
   modal(`${head('Tài khoản')}<p class="mu sm">Tạo tài khoản cho giáo viên (xem & xác nhận buổi học, xem học phí lớp mình) và cho con (tự bấm Bắt đầu / Kết thúc).</p>
-    <div class="list-a">${S.data.users.map(u => `<div data-u="${u.id}">${u.role === 'ph' ? '👨‍👩‍👧' : u.role === 'gv' ? '👩‍🏫' : '🧒'} <div class="f"><b>${h(u.name)}</b>${u.active ? '' : ' <span class="chip">Khóa</span>'}<div class="mu">${h(u.username)} · ${ROLE[u.role]}${u.role === 'gv' ? ' · ' + HT.list(u.courseIds).map(id => C(id).name).join(', ') : ''}${u.role === 'hs' ? ' · ' + h(SN(u.studentId)) : ''}</div></div>›</div>`).join('')}</div>
+    <div class="list-a">${S.data.users.map(u => `<div data-u="${u.id}">${u.role === 'ph' ? '👨‍👩‍👧' : u.role === 'gv' ? '👩‍🏫' : '🧒'} <div class="f"><b>${h(u.name)}</b>${u.active ? '' : u.mustChange ? ' <span class="chip">Khóa</span>' : ' <span class="chip st-vang_phep">Chờ duyệt</span>'}<div class="mu">${h(u.username)} · ${ROLE[u.role]}${u.role === 'gv' ? ' · ' + HT.list(u.courseIds).map(id => C(id).name).join(', ') : ''}${u.role === 'hs' ? ' · ' + h(SN(u.studentId)) : ''}</div></div>›</div>`).join('')}</div>
     <div style="height:10px"></div><button class="btn p w" id="nw">＋ Thêm tài khoản</button>`, el => {
     el.querySelectorAll('[data-u]').forEach(d => d.onclick = () => userForm(S.data.users.find(u => u.id === d.dataset.u)));
     el.querySelector('#nw').onclick = () => userForm(null);

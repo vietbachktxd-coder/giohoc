@@ -7,13 +7,14 @@
  * env = { db:{all,insert,update,remove}, now:()=>({date,time,iso,ms}), hash:(s)=>hex, uid:()=>string }
  * ========================================================================== */
 var HT = (function () {
-  var VERSION = '1.1.0';
+  var VERSION = '1.2.0';
 
   var SCHEMA = {
     users: ['id', 'username', 'name', 'role', 'pass', 'studentId', 'courseIds', 'phone', 'active', 'mustChange', 'createdAt'],
     students: ['id', 'name', 'grade', 'note', 'color', 'active', 'school', 'schoolLat', 'schoolLng'],
     timetable: ['id', 'studentId', 'd', 'start', 'end', 'subject', 'teacher', 'room', 'note'],
     menus: ['id', 'studentId', 'd', 'meal', 'dishes', 'note'],
+    subjects: ['id', 'name', 'teacher', 'room', 'color', 'note'],
     courses: ['id', 'name', 'subject', 'teacher', 'teacherPhone', 'place', 'mode', 'rate', 'monthlyFee', 'roundMin', 'minMin',
       'defaultMin', 'schedule', 'studentIds', 'chargeExcused', 'chargeUnexcused', 'lat', 'lng', 'radius', 'requireGps', 'color', 'active', 'note'],
     sessions: ['id', 'courseId', 'studentId', 'date', 'start', 'end', 'minutes', 'status', 'mode', 'rate', 'note',
@@ -144,7 +145,7 @@ var HT = (function () {
       var un = str(p.username).toLowerCase();
       var u = all('users').filter(function (x) { return str(x.username).toLowerCase() === un; })[0];
       if (!u || u.pass !== hash(str(p.password))) return err('Sai tên đăng nhập hoặc mật khẩu');
-      if (!isT(u.active)) return err('Tài khoản đã bị khóa');
+      if (!isT(u.active)) return err('Tài khoản chưa được duyệt hoặc đã bị khóa. Liên hệ phụ huynh (quản trị).');
       var tok = env.uid() + env.uid();
       db.insert('tokens', { token: tok, userId: u.id, createdAt: env.now().iso, device: str(p.device).slice(0, 80) });
       return { ok: true, token: tok, me: pubUser(u) };
@@ -190,6 +191,7 @@ var HT = (function () {
         sessions: sessions, payments: payments, notifs: nf, unread: nf.filter(function (n) { return !since || n.at > since; }).length,
         users: me.role === 'ph' ? all('users').map(pubUser) : [],
         timetable: me.role === 'gv' ? [] : all('timetable').filter(function (t) { return canStudent(me, t.studentId); }),
+        subjects: all('subjects'),
         menus: me.role === 'gv' ? [] : all('menus').filter(function (m) { return !m.studentId || canStudent(me, m.studentId); })
       };
     });
@@ -417,6 +419,29 @@ var HT = (function () {
       return { ok: true, item: m };
     }, ['ph']);
     A.deleteMenu = secured(function (p) { var m = find('menus', p.id); if (m) del('menus', m); return { ok: true }; }, ['ph']);
+
+    /* ---- Đăng ký tài khoản mới: chờ phụ huynh duyệt ---- */
+    A.register = function (p) {
+      var un = str(p.username).toLowerCase();
+      if (!/^[a-z0-9._-]{3,30}$/.test(un)) return err('Tên đăng nhập 3–30 ký tự, không dấu, không cách');
+      if (!str(p.name)) return err('Nhập họ tên');
+      if (str(p.password).length < 6) return err('Mật khẩu tối thiểu 6 ký tự');
+      if (['gv', 'hs', 'ph'].indexOf(p.role) < 0) return err('Chọn vai trò');
+      if (all('users').some(function (o) { return str(o.username).toLowerCase() === un; })) return err('Tên đăng nhập đã có người dùng');
+      var u = ins('users', { username: un, name: str(p.name), role: p.role, pass: hash(str(p.password)), studentId: '', courseIds: '', phone: str(p.phone), active: '0', mustChange: '0', createdAt: env.now().iso });
+      notifyRole('ph', '🆕 Tài khoản mới chờ duyệt', u.name + ' (' + ROLE[u.role] + ', ' + un + (u.phone ? ', ' + u.phone : '') + ') vừa đăng ký. Vào Khác → Tài khoản để duyệt.');
+      return { ok: true, msg: 'Đã gửi đăng ký. Chờ phụ huynh (quản trị) duyệt rồi đăng nhập.' };
+    };
+
+    /* ---- Danh mục môn học (đầu vào cho thời khóa biểu) ---- */
+    A.saveSubject = secured(function (p) {
+      var x = p.item || {}; if (!str(x.name)) return err('Nhập tên môn');
+      var o = { name: str(x.name), teacher: str(x.teacher), room: str(x.room), color: str(x.color), note: str(x.note) };
+      var m = x.id ? find('subjects', x.id) : null;
+      if (m) upd('subjects', m, o); else m = ins('subjects', o);
+      return { ok: true, item: m };
+    }, ['ph', 'hs']);
+    A.deleteSubject = secured(function (p) { var m = find('subjects', p.id); if (m) del('subjects', m); return { ok: true }; }, ['ph']);
 
     A.saveConfig = secured(function (p) { if (p.appName) setCfg('appName', str(p.appName).slice(0, 40)); return { ok: true }; }, ['ph']);
 

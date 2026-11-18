@@ -591,3 +591,18 @@ function setup() {
   Logger.log('File dữ liệu: ' + ss.getUrl());
   Logger.log(created ? 'Đã tạo tài khoản: admin / 123456 (đổi mật khẩu khi đăng nhập lần đầu)' : 'Dữ liệu đã có sẵn, không tạo lại.');
 }
+
+/** Tạo sẵn tài khoản cho từng người (mật khẩu ban đầu 123456, phải đổi khi đăng nhập lần đầu). Chạy lại không tạo trùng. */
+function taoTaiKhoan() {
+  var env = envGas(), now = env.now().iso, users = DB.all('users'), courses = DB.all('courses'), st = DB.all('students');
+  var pass = env.hash('gh$123456');
+  var admin = users.filter(function (u) { return u.username === 'admin'; })[0];
+  if (admin && !users.some(function (u) { return u.username === 'bach'; })) DB.update('users', admin.id, { username: 'bach', name: 'Đặng Văn Bách' });
+  function cid(word) { var c = courses.filter(function (x) { return String(x.teacher).indexOf(word) >= 0; })[0]; return c ? c.id : ''; }
+  [['tuhao', 'Cô Tú Hảo', 'gv', cid('Tú Hảo'), ''], ['giakhiem', 'Thầy Gia Khiêm', 'gv', cid('Gia Khiêm'), ''], ['con', st[0] ? st[0].name : 'Con', 'hs', '', st[0] ? st[0].id : '']]
+    .forEach(function (a) {
+      if (DB.all('users').some(function (u) { return u.username === a[0]; })) return;
+      DB.insert('users', { id: env.uid(), username: a[0], name: a[1], role: a[2], pass: pass, studentId: a[4], courseIds: a[3], phone: '', active: '1', mustChange: '1', createdAt: now });
+    });
+  Logger.log(DB.all('users').map(function (u) { return u.username + ' · ' + u.name + ' · ' + u.role; }).join('\n'));
+}

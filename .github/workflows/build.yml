@@ -1,0 +1,107 @@
+name: Build APK & Deploy
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: build-deploy
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    outputs:
+      vname: ${{ steps.ver.outputs.vname }}
+      signed: ${{ steps.key.outputs.ok }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - id: ver
+        name: Version
+        run: |
+          echo "vcode=$((100 + ${{ github.run_number }}))" >> $GITHUB_OUTPUT
+          echo "vname=1.0.${{ github.run_number }}" >> $GITHUB_OUTPUT
+          echo "weburl=https://${{ github.repository_owner }}.github.io/${{ github.event.repository.name }}/" | tr 'A-Z' 'a-z' >> $GITHUB_OUTPUT
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.9'
+
+      - name: Signing key
+        id: key
+        env:
+          KS_PASS: ${{ secrets.KS_PASS }}
+        run: |
+          if [ -z "$KS_PASS" ]; then echo "::warning::Chưa có secret KS_PASS - chỉ build thử (debug), không phát hành"; echo "ok=false" >> $GITHUB_OUTPUT; exit 0; fi
+          echo "ok=true" >> $GITHUB_OUTPUT
+          openssl enc -d -aes-256-cbc -pbkdf2 -iter 200000 -in android/app/release.keystore.enc -out android/app/release.keystore -pass env:KS_PASS
+
+      - name: Build chưa ký (khi chưa có KS_PASS) -> nhánh apk-unsigned
+        if: steps.key.outputs.ok != 'true'
+        run: |
+          cd android
+          gradle --no-daemon assembleRelease -PWEB_URL="${{ steps.ver.outputs.weburl }}" -PVCODE="${{ steps.ver.outputs.vcode }}" -PVNAME="${{ steps.ver.outputs.vname }}"
+          cd ..
+          mkdir -p /tmp/out && cp android/app/build/outputs/apk/release/app-release-unsigned.apk /tmp/out/
+          echo '{"versionCode": ${{ steps.ver.outputs.vcode }}, "versionName": "${{ steps.ver.outputs.vname }}"}' > /tmp/out/version.json
+          cd /tmp/out && git init -q -b apk-unsigned && git add -A
+          git -c user.name=ci -c user.email=ci@local commit -qm "unsigned ${{ steps.ver.outputs.vname }}"
+          git push -f "https://x-access-token:${{ github.token }}@github.com/${{ github.repository }}.git" apk-unsigned
+
+      - name: Build APK
+        if: steps.key.outputs.ok == 'true'
+        working-directory: android
+        env:
+          KS_PASS: ${{ secrets.KS_PASS }}
+        run: |
+          gradle --no-daemon assembleRelease \
+            -PWEB_URL="${{ steps.ver.outputs.weburl }}" \
+            -PVCODE="${{ steps.ver.outputs.vcode }}" \
+            -PVNAME="${{ steps.ver.outputs.vname }}"
+
+      - name: Prepare site
+        if: steps.key.outputs.ok == 'true'
+        env:
+          MSG: ${{ github.event.head_commit.message }}
+          VCODE: ${{ steps.ver.outputs.vcode }}
+          VNAME: ${{ steps.ver.outputs.vname }}
+        run: |
+          cp backend/core.js web/core.js
+          mkdir -p site
+          cp -r web/* site/
+          mkdir -p site/download
+          cp android/app/build/outputs/apk/release/app-release.apk site/download/GioHoc.apk
+          python3 -c "
+          import json, os, datetime
+          m = os.environ.get('MSG') or 'Cập nhật ứng dụng'
+          json.dump({'versionCode': int(os.environ['VCODE']), 'versionName': os.environ['VNAME'], 'apk': 'download/GioHoc.apk',
+                     'notes': m.replace('[force]', '').strip()[:300], 'force': '[force]' in m.lower(),
+                     'date': datetime.date.today().strftime('%d/%m/%Y')}, open('site/app-version.json', 'w'), ensure_ascii=False)
+          "
+          cat site/app-version.json
+
+      - name: GitHub Release
+        if: steps.key.outputs.ok == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          MSG: ${{ github.event.head_commit.message }}
+        run: |
+          gh release create "v${{ steps.ver.outputs.vname }}" site/download/GioHoc.apk \
+            --title "Giờ học ${{ steps.ver.outputs.vname }}" --notes "${MSG:-Cập nhật}" || true
+
+      - name: Đưa lên trang tải (nhánh gh-pages)
+        if: steps.key.outputs.ok == 'true'
+        run: |
+          cd site && touch .nojekyll && git init -q -b gh-pages && git add -A
+          git -c user.name=ci -c user.email=ci@local commit -qm "Trang tải app ${{ steps.ver.outputs.vname }}"
+          git push -f "https://x-access-token:${{ github.token }}@github.com/${{ github.repository }}.git" gh-pages

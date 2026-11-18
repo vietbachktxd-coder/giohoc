@@ -25,6 +25,7 @@ const addMonth = (m, k) => { const d = new Date(+m.slice(0, 4), +m.slice(5) - 1 
 const dur = m => { m = Math.round(+m || 0); return m >= 60 ? Math.floor(m / 60) + 'g' + (m % 60 ? p2(m % 60) : '') : m + "'"; };
 const hours = m => (Math.round((+m || 0) / 6) / 10).toString().replace('.', ',') + ' giờ';
 const isT = HT.isT;
+if (!['home', 'log', 'fee', 'stat', 'more'].includes(S.tab)) S.tab = 'home';
 S.month = LS.get('month', thisMonth());
 if (S.month > thisMonth()) S.month = thisMonth();
 
@@ -166,15 +167,14 @@ const multiStudent = () => S.data.students.length > 1;
 function syncNative() {
   if (!NATIVE) return;
   try {
-    const sched = [];
-    activeCourses().forEach(c => (c.schedule || []).forEach(sl => sched.push({ title: c.name, d: +sl.d, t: sl.t, m: +sl.m || 90, id: c.id })));
-    Native.setSession(S.demo ? '' : apiUrl(), S.token, JSON.stringify({ enabled: LS.get('remind', true), before: LS.get('remindBefore', 15), slots: sched }));
+    const p = rmPrefs();
+    Native.setSession(S.demo ? '' : apiUrl(), S.token, JSON.stringify({ enabled: p.on, before: p.before[0] || 30, befores: p.before, slots: remindSlots() }));
     Native.setToday(today(), openSessions().filter(s => s.date === today()).map(s => s.courseId).join(','));
   } catch (e) { }
 }
 
 /* ---------------- Khung ứng dụng ---------------- */
-const TABS = [['home', '✅', 'Điểm danh'], ['tkb', '📅', 'Lịch'], ['log', '📒', 'Nhật ký'], ['fee', '💰', 'Học phí'], ['more', '⚙', 'Khác']];
+const TABS = [['home', '📅', 'Lịch học'], ['log', '📒', 'Nhật ký'], ['fee', '💰', 'Học phí'], ['more', '🛠', 'Quản lý']];
 async function start() {
   $('#app').innerHTML = `<header><h1 id="ttl">Giờ học</h1><button class="ib" id="bell">🔔</button><button class="ib" id="rf">⟳</button></header><main id="v"><div class="empty">Đang tải dữ liệu…</div></main>
     <nav>${TABS.map(t => `<button data-t="${t[0]}"><i>${t[1]}</i>${t[2]}</button>`).join('')}</nav>`;
@@ -190,7 +190,8 @@ function render() {
   document.querySelectorAll('nav button').forEach(b => b.classList.toggle('on', b.dataset.t === (S.tab === 'stat' ? 'fee' : S.tab)));
   $('#ttl').textContent = (S.data.appName || 'Giờ học') + (S.demo ? ' · Dùng thử' : '');
   const u = S.data.unread || 0; $('#bell').innerHTML = '🔔' + (u ? `<b>${u > 9 ? '9+' : u}</b>` : '');
-  ({ home: vHome, tkb: vTkb, log: vLog, stat: vStat, fee: vFee, more: vMore }[S.tab] || vHome)();
+  ({ home: vTkb, tkb: vTkb, log: vLog, stat: vStat, fee: vFee, more: vMore }[S.tab] || vTkb)();
+  remindTick();
 }
 function feeToggle() { return `<div class="tabs"><button data-ft="fee" class="${S.tab === 'fee' ? 'on' : ''}">💰 Học phí</button><button data-ft="stat" class="${S.tab === 'stat' ? 'on' : ''}">📊 Thống kê</button></div>`; }
 function bindFeeToggle() { document.querySelectorAll('[data-ft]').forEach(b => b.onclick = () => { S.tab = b.dataset.ft; LS.set('tab', S.tab); render(); }); }
@@ -207,7 +208,7 @@ function bindMonth(cb) {
 function stopTimer() { if (S.timer) clearInterval(S.timer); S.timer = null; }
 
 /* ---------------- TAB 1: ĐIỂM DANH ---------------- */
-function vHome() {
+function vHome(hdr) {
   const d = today(), w = HT.dow(d), open = openSessions(), P = pairs();
   const todayS = S.data.sessions.filter(s => s.date === d);
   const planned = [], others = [];
@@ -217,6 +218,7 @@ function vHome() {
   let html = `<div class="card row"><div class="f"><div class="mu">${WD[w]}, ${dmy(d)}</div><div class="clock" id="clk">${p2(now.getHours())}:${p2(now.getMinutes())}</div>
     <div class="sm">Xin chào <b>${h(S.me.name)}</b> · ${ROLE[S.me.role]}</div></div>
     <button class="btn o" id="add">＋ Ghi buổi</button></div>`;
+  html = (hdr || '') + html;
   if (S.me.role !== 'gv') html += whereCard();
   open.forEach(s => {
     const c = C(s.course || s.courseId), stale = s.date !== d;
@@ -240,7 +242,7 @@ function vHome() {
   };
   html += `<div class="card"><h3>📅 Lịch học hôm nay</h3>${planned.length ? planned.map(x => card(x, true)).join('') : '<div class="empty">Hôm nay không có lịch học</div>'}</div>`;
   if (others.length) html += `<div class="card"><h3>➕ Học thêm / học bù</h3>${others.map(x => card(x, false)).join('')}</div>`;
-  if (!P.length) html += `<div class="card empty">Chưa có lớp học nào${S.me.role === 'ph' ? '. Vào <b>Khác → Lớp học</b> để tạo lớp.' : ''}</div>`;
+  if (!P.length) html += `<div class="card empty">Chưa có lớp học nào${S.me.role === 'ph' ? '. Vào <b>Quản lý → Lớp học</b> để tạo lớp.' : ''}</div>`;
   // Lịch 7 ngày tới
   let up = '';
   for (let k = 1; k <= 7; k++) {
@@ -250,7 +252,7 @@ function vHome() {
     if (l.length) up += `<div class="item"><div style="width:68px" class="b sm">${WDS[ww]} ${dmy(dd).slice(0, 5)}</div><div class="f sm">${l.map(z => `<div><span style="color:${z.x.c.color}">●</span> ${z.t} ${h(z.x.c.name)}${multiStudent() ? ' · ' + h(SN(z.x.sid)) : ''}</div>`).join('')}</div></div>`;
   }
   if (up) html += `<div class="card"><h3>🗓 7 ngày tới</h3>${up}</div>`;
-  $('#v').innerHTML = html;
+  $('#v').innerHTML = html; bindViews();
   $('#add').onclick = () => sessionForm(null);
   document.querySelectorAll('[data-in]').forEach(b => b.onclick = () => { const [cid, sid] = b.dataset.in.split('|'); checkIn(cid, sid, b); });
   document.querySelectorAll('[data-out]').forEach(b => b.onclick = () => checkOut(b.dataset.out, b));
@@ -373,11 +375,13 @@ function whereCard() {
 }
 
 function vTkb() {
-  S.tk = S.tk || { view: 'week', d: HT.dow(today()), s: '', q: '' };
+  S.tk = S.tk || { view: 'today', d: HT.dow(today()), s: '', q: '' };
   const V = S.tk, st = myStudents(), gv = S.me.role === 'gv';
   if (!V.s || !st.some(x => x.id === V.s)) V.s = st[0] ? st[0].id : '';
-  const views = gv ? [['week', '🗓 Lịch dạy']] : [['week', '🗓 Thời khóa biểu'], ['menu', '🍱 Thực đơn'], ['find', '🔎 Tra cứu']];
-  let html = `<div class="tabs">${views.map(v => `<button data-v="${v[0]}" class="${V.view === v[0] ? 'on' : ''}">${v[1]}</button>`).join('')}</div>`;
+  const views = gv ? [['today', '✅ Điểm danh'], ['week', '🗓 Lịch dạy']] : [['today', '✅ Điểm danh'], ['week', '🗓 Thời khóa biểu'], ['menu', '🍱 Thực đơn'], ['find', '🔎 Tra cứu']];
+  const hdr = `<div class="tabs">${views.map(v => `<button data-v="${v[0]}" class="${V.view === v[0] ? 'on' : ''}">${v[1]}</button>`).join('')}<button id="rmd">⏰ Nhắc lịch</button></div>`;
+  if (V.view === 'today') return vHome(hdr);
+  let html = hdr;
   if (V.view !== 'find') {
     if (st.length > 1 && V.view === 'week') html += `<div class="tabs">${st.map(x => `<button data-st="${x.id}" class="${V.s === x.id ? 'on' : ''}">${h(x.name)}</button>`).join('')}</div>`;
     html += `<div class="tabs">${[1, 2, 3, 4, 5, 6, 7].map(d => `<button data-d="${d}" class="${V.d === d ? 'on' : ''}">${WDS[d]}${d === HT.dow(today()) ? ' •' : ''}</button>`).join('')}</div>`;
@@ -387,7 +391,7 @@ function vTkb() {
     html += `<div class="card"><h3>${WD[V.d]}${gv ? '' : ' · ' + h(Stu(V.s).name || '')}</h3>${items.length ? items.map(x => `<div class="item" ${x.t ? `data-tt="${x.t.id}" style="cursor:pointer"` : ''}><div class="bar" style="background:${x.color}"></div>
       <div style="width:84px" class="sm"><b>${x.start}</b><br><span class="mu">${x.end}</span></div><div class="f"><div class="row"><b class="f">${h(x.title)}</b><span class="chip" style="background:${x.kind === 'ck' ? '#e2e8f0' : '#ccfbf1'}">${x.kind === 'ck' ? 'Chính khóa' : 'Học thêm'}</span></div>
       <div class="mu">${[x.who, x.where].filter(Boolean).map(h).join(' · ')} ${mapLink(x.lat, x.lng)}</div></div></div>`).join('') : '<div class="empty">Không có lịch học</div>'}</div>`;
-    if (!gv && V.s) html += `<button class="btn p w" id="addTT">＋ Thêm tiết học chính khóa</button><p class="mu sm c">Lịch học thêm lấy từ mục Lớp học (Khác → Lớp học).</p>`;
+    if (!gv && V.s) html += `<div class="row wrap gap"><button class="btn p s f" id="addTT">＋ Tiết học</button>${S.me.role === 'ph' ? '<button class="btn o s f" id="tSub">📘 Môn học</button><button class="btn o s f" id="tCou">📚 Lớp học thêm</button>' : ''}</div>`;
   } else if (V.view === 'menu') {
     const ms = (S.data.menus || []).filter(m => +m.d === V.d && (!m.studentId || st.some(x => x.id === m.studentId)));
     html += `<div class="card"><h3>🍱 Thực đơn ${WD[V.d]}</h3>${Object.keys(HT.MEAL).map(k => { const l = ms.filter(m => m.meal === k);
@@ -396,8 +400,8 @@ function vTkb() {
   } else {
     html += whereCard() + `<div class="card"><input id="q" placeholder="🔎 Tìm theo môn, thầy cô, lớp, nơi học…" value="${h(V.q)}"><div id="res"></div></div>`;
   }
-  $('#v').innerHTML = html;
-  document.querySelectorAll('[data-v]').forEach(b => b.onclick = () => { V.view = b.dataset.v; vTkb(); });
+  $('#v').innerHTML = html; bindViews();
+  const ts = $('#tSub'); if (ts) ts.onclick = subjectList; const tc = $('#tCou'); if (tc) tc.onclick = courseList;
   document.querySelectorAll('[data-d]').forEach(b => b.onclick = () => { V.d = +b.dataset.d; vTkb(); });
   document.querySelectorAll('[data-st]').forEach(b => b.onclick = () => { V.s = b.dataset.st; vTkb(); });
   document.querySelectorAll('[data-tt]').forEach(b => b.onclick = () => ttForm(S.data.timetable.find(t => t.id === b.dataset.tt)));
@@ -414,6 +418,50 @@ function vTkb() {
     };
     q.oninput = run; run();
   }
+}
+function bindViews() {
+  document.querySelectorAll('[data-v]').forEach(b => b.onclick = () => { S.tk.view = b.dataset.v; vTkb(); });
+  const r = $('#rmd'); if (r) r.onclick = remindForm;
+}
+/* ---- Nhắc lịch học: lưu theo tài khoản trên máy chủ ---- */
+const RM_OPT = [10, 15, 30, 45, 60, 90, 120, 180];
+function rmPrefs() { const p = (S.me && S.me.prefs) || {}; return { on: p.on !== false, before: p.before || [60, 30], ck: !!p.ck }; }
+function remindForm() {
+  const p = rmPrefs();
+  modal(`${head('⏰ Nhắc lịch học')}<label class="chk"><input type="checkbox" id="on" ${p.on ? 'checked' : ''}>Bật nhắc lịch trên điện thoại</label>
+    <label>Báo trước giờ học (chọn được nhiều mốc)</label><div class="row wrap gap">${RM_OPT.map(m => `<label class="chk" style="width:30%"><input type="checkbox" class="bf" value="${m}" ${p.before.includes(m) ? 'checked' : ''}>${m >= 60 ? Math.floor(m / 60) + ' giờ' + (m % 60 ? ' ' + m % 60 + "'" : '') : m + ' phút'}</label>`).join('')}</div>
+    <label>Hoặc nhập số phút khác</label><input id="cus" inputmode="numeric" placeholder="VD: 240" value="${p.before.filter(m => !RM_OPT.includes(m)).join(',')}">
+    <label class="chk"><input type="checkbox" id="ck" ${p.ck ? 'checked' : ''}>Nhắc cả lịch học chính khóa</label>
+    <p class="mu sm">Lịch học thêm luôn được nhắc; khi hết giờ mà chưa bấm Kết thúc app sẽ nhắc. Cài đặt lưu theo tài khoản, dùng chung trên mọi máy.${IOS ? ' iPhone: thông báo hiện khi app đang mở.' : ''}</p>
+    <button class="btn p w" id="sv">Lưu</button>`, el => {
+    el.querySelector('#sv').onclick = async () => {
+      const b = [...el.querySelectorAll('.bf:checked')].map(i => +i.value).concat(val(el, 'cus').split(/[ ,;]+/).map(Number).filter(n => n > 0 && n < 1440));
+      const prefs = Object.assign({}, S.me.prefs || {}, { on: val(el, 'on'), before: [...new Set(b)].sort((x, y) => y - x), ck: val(el, 'ck') });
+      const r = await api('savePrefs', { prefs }); if (!r.ok) return toast(r.error, 'er');
+      S.me.prefs = prefs; LS.set('me', S.me); syncNative(); closeModal(); toast('Đã lưu nhắc lịch', 'ok');
+      if (!NATIVE && window.Notification && Notification.permission === 'default') Notification.requestPermission();
+    };
+  });
+}
+function remindSlots() {
+  const o = [];
+  activeCourses().forEach(c => { if (S.me.role === 'hs' && !HT.list(c.studentIds).includes(S.me.studentId)) return; (c.schedule || []).forEach(z => o.push({ title: c.name, d: +z.d, t: z.t, m: +z.m || 90, id: c.id, kind: 'ht' })); });
+  if (rmPrefs().ck) (S.data.timetable || []).forEach(t => o.push({ title: t.subject + (multiStudent() ? ' (' + SN(t.studentId) + ')' : ''), d: +t.d, t: t.start, m: HT.min(t.end) - HT.min(t.start), id: t.id, kind: 'ck' }));
+  return o;
+}
+/* Trên web/iPhone: nhắc khi app đang mở */
+function remindTick() {
+  if (NATIVE || S.rmTimer || !S.data) return;
+  S.rmTimer = setInterval(() => {
+    const p = rmPrefs(); if (!p.on || !S.data) return;
+    const n = new Date(), mm = n.getHours() * 60 + n.getMinutes(), d = HT.dow(today()), seen = LS.get('rmSeen', {});
+    remindSlots().filter(x => x.d === d).forEach(x => p.before.forEach(b => {
+      const k = today() + x.id + x.t + b; if (seen[k] || HT.min(x.t) - b !== mm) return;
+      seen[k] = 1; const msg = `⏰ Còn ${b >= 60 ? (b / 60) + ' giờ' : b + ' phút'} nữa: ${x.title} lúc ${x.t}`;
+      toast(msg); try { if (window.Notification && Notification.permission === 'granted') new Notification('Giờ học', { body: msg, icon: 'icons/icon-192.png' }); } catch (e) { }
+    }));
+    LS.set('rmSeen', seen);
+  }, 30000);
 }
 function ttForm(t) {
   const st = myStudents();
@@ -692,7 +740,7 @@ function vMore() {
       <div id="mBak">💾 <span class="f">Sao lưu dữ liệu (JSON)</span></div>
       <div id="mName">✏ <span class="f">Tên phần mềm</span><span class="mu">${h(S.data.appName)}</span></div></div></div>`;
   html += `<div class="card"><h3>Cài đặt</h3><div class="list-a">
-      ${NATIVE ? `<div id="mRem">⏰ <span class="f">Nhắc giờ học trước</span><span class="mu">${LS.get('remind', true) ? LS.get('remindBefore', 15) + ' phút' : 'Tắt'}</span></div>` : ''}
+      <div id="mRem">⏰ <span class="f">Nhắc lịch học</span><span class="mu">${rmPrefs().on ? rmPrefs().before.map(b => b + "'").join(', ') : 'Tắt'}</span></div>
       <div id="mPass">🔑 <span class="f">Đổi mật khẩu</span></div>
       ${NATIVE ? '<div id="mUpd">⬆ <span class="f">Kiểm tra cập nhật</span><span class="mu">' + NATIVE.versionName + '</span></div>' : `<div id="mApk">📱 <span class="f">Cài app (Android / iPhone)</span></div>`}
       ${S.demo ? '<div id="mReset">♻ <span class="f">Xóa dữ liệu dùng thử</span></div>' : ''}
@@ -700,15 +748,13 @@ function vMore() {
     <p class="mu c">Giờ học · giao diện ${APPV}${S.demo ? ' · chế độ dùng thử' : ''}</p>`;
   $('#v').innerHTML = html;
   const on = (id, f) => { const e = $('#' + id); if (e) e.onclick = f; };
-  on('mCourse', courseList); on('mSub', subjectList); on('mTT', () => { S.tk = { view: 'week', d: 1, s: '', q: '' }; go('tkb'); }); on('pend', userList);
+  on('mCourse', courseList); on('mSub', subjectList); on('mTT', () => { S.tk = { view: 'week', d: 1, s: '', q: '' }; go('home'); }); on('pend', userList);
   document.querySelectorAll('[data-go]').forEach(x => x.onclick = () => { const e = $('#' + x.dataset.go); if (e) e.click(); }); on('mStud', studentList); on('mUser', userList); on('mPass', () => changePass(false)); on('mOut', () => logout());
   on('mUpd', () => Native.checkUpdate(true)); on('mApk', () => location.href = 'download/');
   on('mReset', async () => { if (await confirmBox('Xóa toàn bộ dữ liệu dùng thử?', 'Xóa')) { DEMO.reset(); logout(true); } });
   on('mBak', async () => { const r = await api('backup'); if (!r.ok) return toast(r.error, 'er'); download('GioHoc_saoluu_' + today() + '.json', JSON.stringify(r.data, null, 1), 'application/json'); });
   on('mName', () => modal(`${head('Tên phần mềm')}<input id="n" value="${h(S.data.appName)}"><div style="height:12px"></div><button class="btn p w" id="sv">Lưu</button>`, el => el.querySelector('#sv').onclick = async () => { const r = await api('saveConfig', { appName: val(el, 'n') }); if (!r.ok) return toast(r.error, 'er'); closeModal(); await reload(); render(); }));
-  on('mRem', () => modal(`${head('Nhắc giờ học')}<label class="chk"><input type="checkbox" id="on" ${LS.get('remind', true) ? 'checked' : ''}>Bật thông báo nhắc giờ học</label>
-    <label>Nhắc trước giờ học (phút)</label><select id="bf">${[5, 10, 15, 30, 60].map(x => `<option ${x === LS.get('remindBefore', 15) ? 'selected' : ''}>${x}</option>`).join('')}</select>
-    <p class="mu sm">Ngoài ra, khi hết giờ học mà chưa bấm Kết thúc, app sẽ nhắc.</p><button class="btn p w" id="sv">Lưu</button>`, el => el.querySelector('#sv').onclick = () => { LS.set('remind', val(el, 'on')); LS.set('remindBefore', +val(el, 'bf')); syncNative(); closeModal(); vMore(); toast('Đã lưu', 'ok'); }));
+  on('mRem', remindForm);
 }
 
 function courseList() {
@@ -850,7 +896,7 @@ function showNotifs() {
 }
 
 /* ---------------- Cầu nối app Android ---------------- */
-window.__nativeBack = () => { if ($('#modal').innerHTML) { closeModal(); return 'ok'; } if (S.tab !== 'home' && S.token) { go('home'); return 'ok'; } return 'exit'; };
+window.__nativeBack = () => { if ($('#modal').innerHTML) { closeModal(); return 'ok'; } if (S.tab !== 'home' && S.token) { go('home'); return 'ok'; } if (S.tk && S.tk.view !== 'today') { S.tk.view = 'today'; render(); return 'ok'; } return 'exit'; };
 window.__nativeResume = () => { if (S.token && S.data) reload(true).then(ok => { if (ok && !$('#modal').innerHTML && (S.tab === 'home' || S.tab === 'log')) render(); }); };
 window.__nativeOpen = k => { if (k === 'notifs' && S.data) showNotifs(); };
 

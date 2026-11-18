@@ -7,10 +7,10 @@
  * env = { db:{all,insert,update,remove}, now:()=>({date,time,iso,ms}), hash:(s)=>hex, uid:()=>string }
  * ========================================================================== */
 var HT = (function () {
-  var VERSION = '1.2.0';
+  var VERSION = '1.3.0';
 
   var SCHEMA = {
-    users: ['id', 'username', 'name', 'role', 'pass', 'studentId', 'courseIds', 'phone', 'active', 'mustChange', 'createdAt'],
+    users: ['id', 'username', 'name', 'role', 'pass', 'studentId', 'courseIds', 'phone', 'active', 'mustChange', 'createdAt', 'prefs'],
     students: ['id', 'name', 'grade', 'note', 'color', 'active', 'school', 'schoolLat', 'schoolLng'],
     timetable: ['id', 'studentId', 'd', 'start', 'end', 'subject', 'teacher', 'room', 'note'],
     menus: ['id', 'studentId', 'd', 'meal', 'dishes', 'note'],
@@ -123,7 +123,7 @@ var HT = (function () {
       if (r) { r.value = v; db.update('config', k, { value: v }, 'key'); } else { db.insert('config', { key: k, value: v }); all('config').push({ key: k, value: v }); }
     }
     function hash(p) { return env.hash('gh$' + p); }
-    function pubUser(u) { return { id: u.id, username: u.username, name: u.name, role: u.role, studentId: u.studentId, courseIds: u.courseIds, phone: u.phone, active: isT(u.active), mustChange: isT(u.mustChange) }; }
+    function pubUser(u) { return { id: u.id, username: u.username, name: u.name, role: u.role, studentId: u.studentId, courseIds: u.courseIds, phone: u.phone, active: isT(u.active), mustChange: isT(u.mustChange), prefs: json(u.prefs, {}) }; }
     function notify(to, title, body) { ins('notifs', { to: to, title: title, body: body, at: env.now().iso }); }
     function notifyRole(role, title, body, except) {
       all('users').forEach(function (u) { if (u.role === role && isT(u.active) && u.id !== except) notify(u.id, title, body); });
@@ -419,6 +419,9 @@ var HT = (function () {
       return { ok: true, item: m };
     }, ['ph']);
     A.deleteMenu = secured(function (p) { var m = find('menus', p.id); if (m) del('menus', m); return { ok: true }; }, ['ph']);
+
+    /* Cài đặt riêng của từng tài khoản (nhắc lịch…), lưu trên máy chủ */
+    A.savePrefs = secured(function (p, me) { upd('users', me, { prefs: JSON.stringify(p.prefs || {}).slice(0, 2000) }); return { ok: true }; });
 
     /* ---- Đăng ký tài khoản mới: chờ phụ huynh duyệt ---- */
     A.register = function (p) {

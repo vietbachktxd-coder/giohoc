@@ -14,14 +14,14 @@ import java.util.Locale;
 
 /** Đặt báo thức nhắc giờ học (trước giờ học) và nhắc bấm Kết thúc (khi hết giờ), kể cả khi app đang đóng. */
 final class Reminders {
-    static PendingIntent pi(Context c, String type, String date, String title, String cid) {
-        Intent i = new Intent(c, ReminderReceiver.class).putExtra("type", type).putExtra("date", date).putExtra("title", title).putExtra("cid", cid);
+    static PendingIntent pi(Context c, String type, String date, String title, String cid, int mins, String at) {
+        Intent i = new Intent(c, ReminderReceiver.class).putExtra("type", type).putExtra("date", date).putExtra("title", title).putExtra("cid", cid).putExtra("mins", mins).putExtra("at", at);
         return PendingIntent.getBroadcast(c, 7001, i, PendingIntent.FLAG_UPDATE_CURRENT | PendingIntent.FLAG_IMMUTABLE);
     }
 
     static void cancel(Context c) {
         AlarmManager am = c.getSystemService(AlarmManager.class);
-        if (am != null) am.cancel(pi(c, "", "", "", ""));
+        if (am != null) am.cancel(pi(c, "", "", "", "", 0, ""));
     }
 
     static int min(String hhmm) {
@@ -42,12 +42,16 @@ final class Reminders {
             if (js.isEmpty() || token.isEmpty()) return;
             JSONObject s = new JSONObject(js);
             if (!s.optBoolean("enabled", true)) return;
-            int before = s.optInt("before", 15);
+            JSONArray bf = s.optJSONArray("befores");
+            int[] befores;
+            if (bf != null && bf.length() > 0) { befores = new int[bf.length()]; for (int k = 0; k < bf.length(); k++) befores[k] = bf.optInt(k, 30); }
+            else befores = new int[]{s.optInt("before", 30)};
             JSONArray slots = s.optJSONArray("slots");
             if (slots == null || slots.length() == 0) return;
             long now = System.currentTimeMillis() + 30000, best = Long.MAX_VALUE;
-            String bType = "", bDate = "", bTitle = "", bCid = "";
-            for (int off = 0; off < 8; off++) {
+            String bType = "", bDate = "", bTitle = "", bCid = "", bAt = "";
+            int bMins = 0;
+            for (int off = 0; off < 9; off++) {
                 Calendar day = Calendar.getInstance();
                 day.add(Calendar.DAY_OF_MONTH, off);
                 day.set(Calendar.HOUR_OF_DAY, 0); day.set(Calendar.MINUTE, 0); day.set(Calendar.SECOND, 0); day.set(Calendar.MILLISECOND, 0);
@@ -56,20 +60,22 @@ final class Reminders {
                     JSONObject sl = slots.getJSONObject(i);
                     if (sl.optInt("d") != dow) continue;
                     int st = min(sl.optString("t", "18:00")), len = sl.optInt("m", 90);
-                    int[][] marks = {{st - before, 0}, {st + len + 5, 1}};
-                    for (int[] mk : marks) {
-                        long t = day.getTimeInMillis() + mk[0] * 60000L;
+                    boolean extra = !"ck".equals(sl.optString("kind"));
+                    int n = befores.length + (extra ? 1 : 0);
+                    for (int k = 0; k < n; k++) {
+                        boolean out = k == befores.length;
+                        long t = day.getTimeInMillis() + (out ? st + len + 5 : st - befores[k]) * 60000L;
                         if (t > now && t < best) {
-                            best = t; bType = mk[1] == 0 ? "IN" : "OUT"; bDate = ymd(day);
-                            bTitle = sl.optString("title"); bCid = sl.optString("id");
+                            best = t; bType = out ? "OUT" : "IN"; bDate = ymd(day); bMins = out ? 0 : befores[k];
+                            bTitle = sl.optString("title"); bCid = sl.optString("id"); bAt = sl.optString("t");
                         }
                     }
                 }
-                if (best != Long.MAX_VALUE) break;
+                if (best != Long.MAX_VALUE && off > 0) break;
             }
             if (best == Long.MAX_VALUE) return;
             AlarmManager am = c.getSystemService(AlarmManager.class);
-            am.setWindow(AlarmManager.RTC_WAKEUP, best, 2 * 60 * 1000L, pi(c, bType, bDate, bTitle, bCid));
+            am.setWindow(AlarmManager.RTC_WAKEUP, best, 2 * 60 * 1000L, pi(c, bType, bDate, bTitle, bCid, bMins, bAt));
         } catch (Exception ignored) { }
     }
 }

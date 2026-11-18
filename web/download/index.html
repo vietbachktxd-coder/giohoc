@@ -29,10 +29,15 @@ ol{padding-left:20px;line-height:1.6}.muted{color:#6b7280;font-size:13px}
   </div>
   <div class="card"><b>Cập nhật tự động</b><p>Ứng dụng tự kiểm tra bản mới khi mở và chạy nền. Android 12 trở lên tự cài bản mới; máy cũ hơn sẽ hiện thông báo, bấm <b>Cập nhật</b> là xong. Dữ liệu không bị mất.</p></div>
   <div class="card"><b>Máy Xiaomi, Oppo, Vivo, Samsung</b><p>Vào Cài đặt → Ứng dụng → <b>Giờ học</b> → Pin → <b>Không hạn chế</b> để nhận nhắc giờ học và thông báo đúng giờ.</p></div>
-  <div class="card"><b>iPhone</b><p>Mở <a href="../">trang Giờ học</a> bằng Safari → nút Chia sẻ → <b>Thêm vào MH chính</b>.</p></div>
+  <div class="card" id="ios"><b>📱 iPhone / iPad</b>
+    <ol><li>Mở link <b><a href="../">vietbachktxd-coder.github.io/giohoc</a></b> bằng <b>Safari</b>.</li>
+    <li>Bấm nút <b>Chia sẻ ⬆</b> (giữa thanh dưới) → kéo xuống chọn <b>Thêm vào MH chính</b> → <b>Thêm</b>.</li>
+    <li>Biểu tượng <b>Giờ học</b> xuất hiện trên màn hình, mở như app bình thường. Bản mới tự cập nhật khi mở app.</li></ol></div>
   <p class="muted" style="text-align:center"><a href="../">← Mở bản web</a></p>
 </main>
 <script>
+if (/iPhone|iPad|iPod/.test(navigator.userAgent)) { document.getElementById('dl').style.display='none'; document.getElementById('ios').style.border='2px solid #0f766e'; }
+
 fetch('../app-version.json?t=' + Date.now()).then(r => r.json()).then(j => {
   document.getElementById('ver').textContent = 'Phiên bản ' + j.versionName + (j.date ? ' · ' + j.date : '');
 }).catch(() => {});

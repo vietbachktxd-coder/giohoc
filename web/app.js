@@ -5,6 +5,7 @@ const LS = { get: (k, d) => { try { const v = localStorage.getItem('gh_' + k); r
   set: (k, v) => { try { localStorage.setItem('gh_' + k, JSON.stringify(v)); } catch (e) { } }, del: k => localStorage.removeItem('gh_' + k) };
 const NATIVE = (() => { try { return window.Native ? JSON.parse(Native.info()) : null; } catch (e) { return null; } })();
 const APPV = self.APP_VERSION || '1.0.0';
+const IOS = /iPhone|iPad|iPod/.test(navigator.userAgent);
 const ST = HT.STATUS, ROLE = HT.ROLE, money = HT.money;
 const WD = ['', 'Thứ 2', 'Thứ 3', 'Thứ 4', 'Thứ 5', 'Thứ 6', 'Thứ 7', 'Chủ nhật'], WDS = ['', 'T2', 'T3', 'T4', 'T5', 'T6', 'T7', 'CN'];
 const MODE = { gio: 'Theo giờ', buoi: 'Theo buổi', thang: 'Trọn gói tháng' };
@@ -83,6 +84,7 @@ function viewLogin() {
       <button class="btn o s" id="demo">👀 Dùng thử (dữ liệu mẫu)</button>
       <button class="btn o s" id="srv">⚙ Máy chủ</button>
     </div>
+    ${IOS && !navigator.standalone ? '<div class="info">📱 <b>iPhone:</b> bấm nút Chia sẻ <b>⬆</b> của Safari → <b>Thêm vào MH chính</b> để cài app. App tự cập nhật khi có bản mới.</div>' : ''}
     <p class="mu c" style="margin-top:22px">Phiên bản ${APPV}${NATIVE ? ' · App Android ' + NATIVE.versionName : ''}</p></div>`;
   const go = async () => {
     const u = val(document, 'u'), pw = $('#pw').value;
@@ -153,7 +155,7 @@ function syncNative() {
 }
 
 /* ---------------- Khung ứng dụng ---------------- */
-const TABS = [['home', '✅', 'Điểm danh'], ['log', '📒', 'Nhật ký'], ['stat', '📊', 'Thống kê'], ['fee', '💰', 'Học phí'], ['more', '⚙', 'Khác']];
+const TABS = [['home', '✅', 'Điểm danh'], ['tkb', '📅', 'Lịch'], ['log', '📒', 'Nhật ký'], ['fee', '💰', 'Học phí'], ['more', '⚙', 'Khác']];
 async function start() {
   $('#app').innerHTML = `<header><h1 id="ttl">Giờ học</h1><button class="ib" id="bell">🔔</button><button class="ib" id="rf">⟳</button></header><main id="v"><div class="empty">Đang tải dữ liệu…</div></main>
     <nav>${TABS.map(t => `<button data-t="${t[0]}"><i>${t[1]}</i>${t[2]}</button>`).join('')}</nav>`;
@@ -166,15 +168,18 @@ function go(t) { S.tab = t; LS.set('tab', t); render(); scrollTo(0, 0); }
 function render() {
   if (!S.data) return;
   stopTimer();
-  document.querySelectorAll('nav button').forEach(b => b.classList.toggle('on', b.dataset.t === S.tab));
+  document.querySelectorAll('nav button').forEach(b => b.classList.toggle('on', b.dataset.t === (S.tab === 'stat' ? 'fee' : S.tab)));
   $('#ttl').textContent = (S.data.appName || 'Giờ học') + (S.demo ? ' · Dùng thử' : '');
   const u = S.data.unread || 0; $('#bell').innerHTML = '🔔' + (u ? `<b>${u > 9 ? '9+' : u}</b>` : '');
-  ({ home: vHome, log: vLog, stat: vStat, fee: vFee, more: vMore }[S.tab] || vHome)();
+  ({ home: vHome, tkb: vTkb, log: vLog, stat: vStat, fee: vFee, more: vMore }[S.tab] || vHome)();
 }
+function feeToggle() { return `<div class="tabs"><button data-ft="fee" class="${S.tab === 'fee' ? 'on' : ''}">💰 Học phí</button><button data-ft="stat" class="${S.tab === 'stat' ? 'on' : ''}">📊 Thống kê</button></div>`; }
+function bindFeeToggle() { document.querySelectorAll('[data-ft]').forEach(b => b.onclick = () => { S.tab = b.dataset.ft; LS.set('tab', S.tab); render(); }); }
 function monthNav(cb) {
-  return `<div class="mnav"><button class="btn o" data-m="-1">‹</button><b>${mLabel(S.month)}</b><button class="btn o" data-m="1" ${S.month >= thisMonth() ? 'disabled' : ''}>›</button></div>`;
+  return (S.tab === 'fee' || S.tab === 'stat' ? feeToggle() : '') + `<div class="mnav"><button class="btn o" data-m="-1">‹</button><b>${mLabel(S.month)}</b><button class="btn o" data-m="1" ${S.month >= thisMonth() ? 'disabled' : ''}>›</button></div>`;
 }
 function bindMonth(cb) {
+  bindFeeToggle();
   document.querySelectorAll('[data-m]').forEach(b => b.onclick = async () => {
     S.month = addMonth(S.month, +b.dataset.m); LS.set('month', S.month); S.filter.day = ''; S.bill = null;
     $('#v').style.opacity = .5; await reload(); $('#v').style.opacity = 1; cb();
@@ -193,6 +198,7 @@ function vHome() {
   let html = `<div class="card row"><div class="f"><div class="mu">${WD[w]}, ${dmy(d)}</div><div class="clock" id="clk">${p2(now.getHours())}:${p2(now.getMinutes())}</div>
     <div class="sm">Xin chào <b>${h(S.me.name)}</b> · ${ROLE[S.me.role]}</div></div>
     <button class="btn o" id="add">＋ Ghi buổi</button></div>`;
+  if (S.me.role !== 'gv') html += whereCard();
   open.forEach(s => {
     const c = C(s.course || s.courseId), stale = s.date !== d;
     html += `<div class="card live"><div class="row"><div class="bar" style="background:${c.color}"></div><div class="f">
@@ -313,6 +319,114 @@ function sessionForm(s) {
     };
     const del = el.querySelector('#del');
     if (del) del.onclick = async () => { if (!(await confirmBox('Xóa buổi học này?', 'Xóa'))) return; const r = await api('deleteSession', { id: s.id }); if (!r.ok) return toast(r.error, 'er'); toast('Đã xóa', 'ok'); S.bill = S.sum = null; await reload(); render(); };
+  });
+}
+
+/* ---------------- TAB LỊCH: TKB chính khóa + học thêm, thực đơn, tra cứu ---------------- */
+const nowMin = () => { const n = new Date(); return n.getHours() * 60 + n.getMinutes(); };
+const mapLink = (lat, lng) => +lat && +lng ? `<a href="https://maps.google.com/?q=${lat},${lng}" target="_blank" rel="noopener">📍 Bản đồ</a>` : '';
+const Stu = id => S.data.students.find(s => s.id === id) || {};
+const myStudents = () => S.data.students.filter(s => isT(s.active) && (S.me.role !== 'hs' || s.id === S.me.studentId));
+
+/* Mọi lịch của 1 học sinh trong 1 thứ: chính khóa + học thêm */
+function dayItems(sid, d) {
+  const o = [];
+  (S.data.timetable || []).filter(t => t.studentId === sid && +t.d === d).forEach(t => o.push({ kind: 'ck', start: t.start, end: t.end, title: t.subject, who: t.teacher, where: [t.room, Stu(sid).school].filter(Boolean).join(' · '), lat: Stu(sid).schoolLat, lng: Stu(sid).schoolLng, color: '#64748b', t }));
+  activeCourses().filter(c => HT.list(c.studentIds).includes(sid)).forEach(c => (c.schedule || []).filter(z => +z.d === d).forEach(z =>
+    o.push({ kind: 'ht', start: z.t, end: HT.hhmm(HT.min(z.t) + (+z.m || 90)), title: c.name, who: c.teacher, where: c.place, lat: c.lat, lng: c.lng, color: c.color, c })));
+  return o.sort((a, b) => a.start < b.start ? -1 : 1);
+}
+
+/* Học sinh đang ở đâu lúc này */
+function whereNow(sid) {
+  const op = openSessions().find(s => s.studentId === sid && s.date === today());
+  if (op) { const c = C(op.courseId); return { icon: '🟢', text: `Đang học thêm <b>${h(c.name)}</b> · ${h(c.teacher || '')} · từ ${op.start}`, where: c.place, lat: op.inLat || c.lat, lng: op.inLng || c.lng }; }
+  const n = nowMin(), d = HT.dow(today()), items = dayItems(sid, d);
+  const cur = items.find(x => HT.min(x.start) <= n && n < HT.min(x.end));
+  if (cur) return { icon: cur.kind === 'ck' ? '🏫' : '🟡', text: cur.kind === 'ck' ? `Đang học chính khóa <b>${h(cur.title)}</b>${cur.who ? ' · ' + h(cur.who) : ''} (${cur.start}–${cur.end})` : `Theo lịch đang học <b>${h(cur.title)}</b> nhưng <b>chưa điểm danh</b>`, where: cur.where, lat: cur.lat, lng: cur.lng };
+  const nx = items.find(x => HT.min(x.start) > n);
+  return { icon: '⚪', text: nx ? `Không có giờ học · tiếp theo ${nx.start} <b>${h(nx.title)}</b>` : 'Hôm nay đã hết giờ học', where: nx ? nx.where : '', lat: nx && nx.lat, lng: nx && nx.lng };
+}
+function whereCard() {
+  const st = myStudents(); if (!st.length) return '';
+  return `<div class="card"><h3>📍 ${st.length > 1 || S.me.role === 'ph' ? 'Con đang ở đâu' : 'Lúc này'}</h3>${st.map(s => { const w = whereNow(s.id);
+    return `<div class="item"><div style="font-size:20px">${w.icon}</div><div class="f">${st.length > 1 || S.me.role === 'ph' ? `<b>${h(s.name)}</b> · ` : ''}${w.text}<div class="mu">${h(w.where || '')} ${mapLink(w.lat, w.lng)}</div></div></div>`; }).join('')}</div>`;
+}
+
+function vTkb() {
+  S.tk = S.tk || { view: 'week', d: HT.dow(today()), s: '', q: '' };
+  const V = S.tk, st = myStudents(), gv = S.me.role === 'gv';
+  if (!V.s || !st.some(x => x.id === V.s)) V.s = st[0] ? st[0].id : '';
+  const views = gv ? [['week', '🗓 Lịch dạy']] : [['week', '🗓 Thời khóa biểu'], ['menu', '🍱 Thực đơn'], ['find', '🔎 Tra cứu']];
+  let html = `<div class="tabs">${views.map(v => `<button data-v="${v[0]}" class="${V.view === v[0] ? 'on' : ''}">${v[1]}</button>`).join('')}</div>`;
+  if (V.view !== 'find') {
+    if (st.length > 1 && V.view === 'week') html += `<div class="tabs">${st.map(x => `<button data-st="${x.id}" class="${V.s === x.id ? 'on' : ''}">${h(x.name)}</button>`).join('')}</div>`;
+    html += `<div class="tabs">${[1, 2, 3, 4, 5, 6, 7].map(d => `<button data-d="${d}" class="${V.d === d ? 'on' : ''}">${WDS[d]}${d === HT.dow(today()) ? ' •' : ''}</button>`).join('')}</div>`;
+  }
+  if (V.view === 'week') {
+    const items = gv ? pairs().flatMap(x => (x.c.schedule || []).filter(z => +z.d === V.d).map(z => ({ kind: 'ht', start: z.t, end: HT.hhmm(HT.min(z.t) + (+z.m || 90)), title: x.c.name, who: SN(x.sid), where: x.c.place, lat: x.c.lat, lng: x.c.lng, color: x.c.color }))).sort((a, b) => a.start < b.start ? -1 : 1) : dayItems(V.s, V.d);
+    html += `<div class="card"><h3>${WD[V.d]}${gv ? '' : ' · ' + h(Stu(V.s).name || '')}</h3>${items.length ? items.map(x => `<div class="item" ${x.t ? `data-tt="${x.t.id}" style="cursor:pointer"` : ''}><div class="bar" style="background:${x.color}"></div>
+      <div style="width:84px" class="sm"><b>${x.start}</b><br><span class="mu">${x.end}</span></div><div class="f"><div class="row"><b class="f">${h(x.title)}</b><span class="chip" style="background:${x.kind === 'ck' ? '#e2e8f0' : '#ccfbf1'}">${x.kind === 'ck' ? 'Chính khóa' : 'Học thêm'}</span></div>
+      <div class="mu">${[x.who, x.where].filter(Boolean).map(h).join(' · ')} ${mapLink(x.lat, x.lng)}</div></div></div>`).join('') : '<div class="empty">Không có lịch học</div>'}</div>`;
+    if (!gv && V.s) html += `<button class="btn p w" id="addTT">＋ Thêm tiết học chính khóa</button><p class="mu sm c">Lịch học thêm lấy từ mục Lớp học (Khác → Lớp học).</p>`;
+  } else if (V.view === 'menu') {
+    const ms = (S.data.menus || []).filter(m => +m.d === V.d && (!m.studentId || st.some(x => x.id === m.studentId)));
+    html += `<div class="card"><h3>🍱 Thực đơn ${WD[V.d]}</h3>${Object.keys(HT.MEAL).map(k => { const l = ms.filter(m => m.meal === k);
+      return `<div class="item"><div style="width:84px" class="b sm">${HT.MEAL[k]}</div><div class="f">${l.length ? l.map(m => `<div ${S.me.role === 'ph' ? `data-mn="${m.id}" style="cursor:pointer"` : ''}>${h(m.dishes)}${m.studentId && st.length > 1 ? ` <span class="chip">${h(SN(m.studentId))}</span>` : ''}${m.note ? `<div class="mu">${h(m.note)}</div>` : ''}</div>`).join('') : '<span class="mu">—</span>'}</div></div>`; }).join('')}</div>
+      ${S.me.role === 'ph' ? '<button class="btn p w" id="addMn">＋ Thêm món</button>' : ''}`;
+  } else {
+    html += whereCard() + `<div class="card"><input id="q" placeholder="🔎 Tìm theo môn, thầy cô, lớp, nơi học…" value="${h(V.q)}"><div id="res"></div></div>`;
+  }
+  $('#v').innerHTML = html;
+  document.querySelectorAll('[data-v]').forEach(b => b.onclick = () => { V.view = b.dataset.v; vTkb(); });
+  document.querySelectorAll('[data-d]').forEach(b => b.onclick = () => { V.d = +b.dataset.d; vTkb(); });
+  document.querySelectorAll('[data-st]').forEach(b => b.onclick = () => { V.s = b.dataset.st; vTkb(); });
+  document.querySelectorAll('[data-tt]').forEach(b => b.onclick = () => ttForm(S.data.timetable.find(t => t.id === b.dataset.tt)));
+  document.querySelectorAll('[data-mn]').forEach(b => b.onclick = () => menuForm(S.data.menus.find(m => m.id === b.dataset.mn)));
+  const a = $('#addTT'); if (a) a.onclick = () => ttForm({ studentId: V.s, d: V.d, start: '07:00', end: '07:45' });
+  const m = $('#addMn'); if (m) m.onclick = () => menuForm({ d: V.d, meal: 'trua', studentId: '' });
+  const q = $('#q');
+  if (q) {
+    const run = () => {
+      V.q = q.value.trim(); const k = V.q.toLowerCase(), out = [];
+      st.forEach(s => { for (let d = 1; d <= 7; d++) dayItems(s.id, d).forEach(x => { const txt = [x.title, x.who, x.where, s.name].join(' ').toLowerCase(); if (!k || txt.includes(k)) out.push(Object.assign({ d, sn: s.name }, x)); }); });
+      $('#res').innerHTML = out.length ? out.slice(0, 80).map(x => `<div class="item"><div class="bar" style="background:${x.color}"></div><div style="width:84px" class="sm"><b>${WDS[x.d]}</b> ${x.start}<br><span class="mu">→ ${x.end}</span></div>
+        <div class="f"><b>${h(x.title)}</b> <span class="chip">${x.kind === 'ck' ? 'Chính khóa' : 'Học thêm'}</span>${st.length > 1 ? ' · ' + h(x.sn) : ''}<div class="mu">${[x.who, x.where].filter(Boolean).map(h).join(' · ')} ${mapLink(x.lat, x.lng)}</div></div></div>`).join('') : '<div class="empty">Không tìm thấy</div>';
+    };
+    q.oninput = run; run();
+  }
+}
+function ttForm(t) {
+  const st = myStudents();
+  modal(`${head(t.id ? 'Sửa tiết học' : 'Thêm tiết chính khóa')}
+    ${st.length > 1 ? `<label>Học sinh</label><select id="sid">${st.map(s => `<option value="${s.id}" ${s.id === t.studentId ? 'selected' : ''}>${h(s.name)}</option>`).join('')}</select>` : `<input type="hidden" id="sid" value="${t.studentId}">`}
+    <div class="g2"><div><label>Thứ</label><select id="d">${[1, 2, 3, 4, 5, 6, 7].map(d => `<option value="${d}" ${+t.d === d ? 'selected' : ''}>${WD[d]}</option>`).join('')}</select></div><div><label>Môn học</label><input id="subject" value="${h(t.subject || '')}"></div></div>
+    <div class="g2"><div><label>Bắt đầu</label><input id="start" type="time" value="${t.start}"></div><div><label>Kết thúc</label><input id="end" type="time" value="${t.end}"></div></div>
+    <div class="g2"><div><label>Giáo viên</label><input id="teacher" value="${h(t.teacher || '')}"></div><div><label>Phòng / lớp</label><input id="room" value="${h(t.room || '')}"></div></div>
+    <label>Ghi chú</label><input id="note" value="${h(t.note || '')}">
+    ${t.id ? '' : '<label class="chk"><input type="checkbox" id="rep">Lặp lại cho các ngày Thứ 2 – Thứ 6</label>'}
+    <div style="height:12px"></div><div class="row">${t.id ? '<button class="btn er" id="del">Xóa</button>' : ''}<button class="btn p f" id="sv">Lưu</button></div>`, el => {
+    el.querySelector('#sv').onclick = async e => {
+      const x = { id: t.id, studentId: val(el, 'sid'), d: +val(el, 'd'), subject: val(el, 'subject'), start: val(el, 'start'), end: val(el, 'end'), teacher: val(el, 'teacher'), room: val(el, 'room'), note: val(el, 'note') };
+      const days = val(el, 'rep') ? [1, 2, 3, 4, 5] : [x.d];
+      busy(e.target, true);
+      for (const d of days) { const r = await api('saveTT', { item: Object.assign({}, x, { d }) }); if (!r.ok) { busy(e.target, false); return toast(r.error, 'er'); } }
+      busy(e.target, false); closeModal(); toast('Đã lưu', 'ok'); await reload(); vTkb();
+    };
+    const d = el.querySelector('#del'); if (d) d.onclick = async () => { await api('deleteTT', { id: t.id }); closeModal(); await reload(); vTkb(); };
+  });
+}
+function menuForm(m) {
+  const st = S.data.students;
+  modal(`${head(m.id ? 'Sửa thực đơn' : 'Thêm món')}
+    <div class="g2"><div><label>Thứ</label><select id="d">${[1, 2, 3, 4, 5, 6, 7].map(d => `<option value="${d}" ${+m.d === d ? 'selected' : ''}>${WD[d]}</option>`).join('')}</select></div>
+    <div><label>Bữa</label><select id="meal">${Object.keys(HT.MEAL).map(k => `<option value="${k}" ${m.meal === k ? 'selected' : ''}>${HT.MEAL[k]}</option>`).join('')}</select></div></div>
+    <label>Món ăn</label><input id="dishes" value="${h(m.dishes || '')}" placeholder="VD: Cơm, cá kho, canh chua">
+    ${st.length > 1 ? `<label>Cho học sinh</label><select id="sid"><option value="">Tất cả</option>${st.map(s => `<option value="${s.id}" ${s.id === m.studentId ? 'selected' : ''}>${h(s.name)}</option>`).join('')}</select>` : ''}
+    <label>Ghi chú (dinh dưỡng, dị ứng…)</label><input id="note" value="${h(m.note || '')}">
+    <div style="height:12px"></div><div class="row">${m.id ? '<button class="btn er" id="del">Xóa</button>' : ''}<button class="btn p f" id="sv">Lưu</button></div>`, el => {
+    el.querySelector('#sv').onclick = async () => { const r = await api('saveMenu', { item: { id: m.id, d: +val(el, 'd'), meal: val(el, 'meal'), dishes: val(el, 'dishes'), studentId: val(el, 'sid'), note: val(el, 'note') } }); if (!r.ok) return toast(r.error, 'er'); closeModal(); await reload(); vTkb(); };
+    const d = el.querySelector('#del'); if (d) d.onclick = async () => { await api('deleteMenu', { id: m.id }); closeModal(); await reload(); vTkb(); };
   });
 }
 
@@ -549,7 +663,7 @@ function vMore() {
   html += `<div class="card"><h3>Cài đặt</h3><div class="list-a">
       ${NATIVE ? `<div id="mRem">⏰ <span class="f">Nhắc giờ học trước</span><span class="mu">${LS.get('remind', true) ? LS.get('remindBefore', 15) + ' phút' : 'Tắt'}</span></div>` : ''}
       <div id="mPass">🔑 <span class="f">Đổi mật khẩu</span></div>
-      ${NATIVE ? '<div id="mUpd">⬆ <span class="f">Kiểm tra cập nhật</span><span class="mu">' + NATIVE.versionName + '</span></div>' : `<div id="mApk">📱 <span class="f">Tải app Android</span></div>`}
+      ${NATIVE ? '<div id="mUpd">⬆ <span class="f">Kiểm tra cập nhật</span><span class="mu">' + NATIVE.versionName + '</span></div>' : `<div id="mApk">📱 <span class="f">Cài app (Android / iPhone)</span></div>`}
       ${S.demo ? '<div id="mReset">♻ <span class="f">Xóa dữ liệu dùng thử</span></div>' : ''}
       <div id="mOut" style="color:var(--er)">⎋ <span class="f">Đăng xuất</span></div></div></div>
     <p class="mu c">Giờ học · giao diện ${APPV}${S.demo ? ' · chế độ dùng thử' : ''}</p>`;
@@ -627,8 +741,12 @@ function studentList() {
     const form = s => {
       s = s || { name: '', grade: '', note: '' };
       modal(`${head(s.id ? 'Sửa học sinh' : 'Thêm học sinh')}<label>Họ tên</label><input id="name" value="${h(s.name)}"><label>Lớp (ở trường)</label><input id="grade" value="${h(s.grade || '')}" placeholder="VD: Lớp 8A">
+        <label>Trường học</label><input id="school" value="${h(s.school || '')}">
+        <label>📍 Vị trí trường (để tra cứu)</label><div class="g2"><input id="schoolLat" placeholder="Vĩ độ" value="${h(s.schoolLat || '')}"><input id="schoolLng" placeholder="Kinh độ" value="${h(s.schoolLng || '')}"></div>
+        <button class="btn o s" id="here" style="margin-top:6px">📍 Lấy vị trí hiện tại</button>
         <label>Ghi chú</label><input id="note" value="${h(s.note || '')}"><div style="height:14px"></div><button class="btn p w" id="sv">Lưu</button>`, e2 => {
-        e2.querySelector('#sv').onclick = async () => { const r = await api('saveStudent', { student: { id: s.id, name: val(e2, 'name'), grade: val(e2, 'grade'), note: val(e2, 'note') } }); if (!r.ok) return toast(r.error, 'er'); await reload(); render(); studentList(); toast('Đã lưu', 'ok'); };
+        e2.querySelector('#here').onclick = async () => { const q = await getPos(); if (!q) return toast('Không lấy được vị trí', 'er'); e2.querySelector('#schoolLat').value = q.lat.toFixed(6); e2.querySelector('#schoolLng').value = q.lng.toFixed(6); };
+        e2.querySelector('#sv').onclick = async () => { const r = await api('saveStudent', { student: { id: s.id, name: val(e2, 'name'), grade: val(e2, 'grade'), note: val(e2, 'note'), school: val(e2, 'school'), schoolLat: val(e2, 'schoolLat'), schoolLng: val(e2, 'schoolLng') } }); if (!r.ok) return toast(r.error, 'er'); await reload(); render(); studentList(); toast('Đã lưu', 'ok'); };
       });
     };
     el.querySelectorAll('[data-s]').forEach(d => d.onclick = () => form(S.data.students.find(s => s.id === d.dataset.s)));

@@ -6,11 +6,13 @@
  * env = { db:{all,insert,update,remove}, now:()=>({date,time,iso,ms}), hash:(s)=>hex, uid:()=>string }
  * ========================================================================== */
 var HT = (function () {
-  var VERSION = '1.0.0';
+  var VERSION = '1.1.0';
 
   var SCHEMA = {
     users: ['id', 'username', 'name', 'role', 'pass', 'studentId', 'courseIds', 'phone', 'active', 'mustChange', 'createdAt'],
-    students: ['id', 'name', 'grade', 'note', 'color', 'active'],
+    students: ['id', 'name', 'grade', 'note', 'color', 'active', 'school', 'schoolLat', 'schoolLng'],
+    timetable: ['id', 'studentId', 'd', 'start', 'end', 'subject', 'teacher', 'room', 'note'],
+    menus: ['id', 'studentId', 'd', 'meal', 'dishes', 'note'],
     courses: ['id', 'name', 'subject', 'teacher', 'teacherPhone', 'place', 'mode', 'rate', 'monthlyFee', 'roundMin', 'minMin',
       'defaultMin', 'schedule', 'studentIds', 'chargeExcused', 'chargeUnexcused', 'lat', 'lng', 'radius', 'requireGps', 'color', 'active', 'note'],
     sessions: ['id', 'courseId', 'studentId', 'date', 'start', 'end', 'minutes', 'status', 'mode', 'rate', 'note',
@@ -25,6 +27,7 @@ var HT = (function () {
     co_mat: 'Có mặt', hoc_bu: 'Học bù', vang_phep: 'Vắng có phép', vang_kp: 'Vắng không phép', gv_nghi: 'GV nghỉ'
   };
   var ROLE = { ph: 'Phụ huynh', gv: 'Giáo viên', hs: 'Học sinh' };
+  var MEAL = { sang: 'Bữa sáng', trua: 'Bữa trưa', xe: 'Bữa xế', toi: 'Bữa tối' };
 
   /* ---------------- tiện ích ---------------- */
   function isT(v) { return v === true || v === 1 || v === '1' || String(v).toUpperCase() === 'TRUE'; }
@@ -184,7 +187,9 @@ var HT = (function () {
         ok: true, me: pubUser(me), now: env.now(), appName: cfg('appName', 'Giờ học'),
         students: studs, courses: courses.map(function (c) { var o = {}; for (var k in c) o[k] = c[k]; o.schedule = json(c.schedule, []); return o; }),
         sessions: sessions, payments: payments, notifs: nf, unread: nf.filter(function (n) { return !since || n.at > since; }).length,
-        users: me.role === 'ph' ? all('users').map(pubUser) : []
+        users: me.role === 'ph' ? all('users').map(pubUser) : [],
+        timetable: me.role === 'gv' ? [] : all('timetable').filter(function (t) { return canStudent(me, t.studentId); }),
+        menus: me.role === 'gv' ? [] : all('menus').filter(function (m) { return !m.studentId || canStudent(me, m.studentId); })
       };
     });
 
@@ -359,7 +364,8 @@ var HT = (function () {
 
     A.saveStudent = secured(function (p) {
       var x = p.student || {}; if (!str(x.name)) return err('Nhập tên học sinh');
-      var o = { name: str(x.name), grade: str(x.grade), note: str(x.note), color: str(x.color), active: x.active === undefined || isT(x.active) ? '1' : '0' };
+      var o = { name: str(x.name), grade: str(x.grade), note: str(x.note), color: str(x.color), active: x.active === undefined || isT(x.active) ? '1' : '0',
+        school: str(x.school), schoolLat: str(x.schoolLat), schoolLng: str(x.schoolLng) };
       var s = x.id ? find('students', x.id) : null;
       if (s) upd('students', s, o); else s = ins('students', o);
       return { ok: true, student: s };
@@ -382,6 +388,34 @@ var HT = (function () {
       else { if (!o.pass) { o.pass = hash('123456'); o.mustChange = '1'; } o.createdAt = env.now().iso; u = ins('users', o); }
       return { ok: true, user: pubUser(u) };
     }, ['ph']);
+
+    /* ---- Thời khóa biểu chính khóa (phụ huynh, học sinh) ---- */
+    A.saveTT = secured(function (p, me) {
+      var x = p.item || {}, sid = me.role === 'hs' ? me.studentId : str(x.studentId);
+      if (!find('students', sid)) return err('Chọn học sinh');
+      if (!(num(x.d) >= 1 && num(x.d) <= 7)) return err('Chọn thứ');
+      if (!str(x.subject)) return err('Nhập môn học');
+      if (!/^\d{1,2}:\d{2}$/.test(str(x.start)) || !/^\d{1,2}:\d{2}$/.test(str(x.end)) || min(x.end) <= min(x.start)) return err('Giờ học không hợp lệ');
+      var o = { studentId: sid, d: num(x.d), start: str(x.start), end: str(x.end), subject: str(x.subject), teacher: str(x.teacher), room: str(x.room), note: str(x.note) };
+      var t = x.id ? find('timetable', x.id) : null;
+      if (t && !canStudent(me, t.studentId)) return err('Bạn không có quyền');
+      if (t) upd('timetable', t, o); else t = ins('timetable', o);
+      return { ok: true, item: t };
+    }, ['ph', 'hs']);
+    A.deleteTT = secured(function (p, me) { var t = find('timetable', p.id); if (t && canStudent(me, t.studentId)) del('timetable', t); return { ok: true }; }, ['ph', 'hs']);
+
+    /* ---- Thực đơn hằng tuần ---- */
+    A.saveMenu = secured(function (p) {
+      var x = p.item || {};
+      if (!(num(x.d) >= 1 && num(x.d) <= 7)) return err('Chọn thứ');
+      if (!MEAL[x.meal]) return err('Chọn bữa');
+      if (!str(x.dishes)) return err('Nhập món ăn');
+      var o = { studentId: str(x.studentId), d: num(x.d), meal: x.meal, dishes: str(x.dishes), note: str(x.note) };
+      var m = x.id ? find('menus', x.id) : null;
+      if (m) upd('menus', m, o); else m = ins('menus', o);
+      return { ok: true, item: m };
+    }, ['ph']);
+    A.deleteMenu = secured(function (p) { var m = find('menus', p.id); if (m) del('menus', m); return { ok: true }; }, ['ph']);
 
     A.saveConfig = secured(function (p) { if (p.appName) setCfg('appName', str(p.appName).slice(0, 40)); return { ok: true }; }, ['ph']);
 
@@ -420,7 +454,7 @@ var HT = (function () {
     return { handle: handle, seed: seed };
   }
 
-  return { VERSION: VERSION, SCHEMA: SCHEMA, STATUS: STATUS, ROLE: ROLE, create: create, monthBill: monthBill, sessionFee: sessionFee,
+  return { VERSION: VERSION, SCHEMA: SCHEMA, STATUS: STATUS, ROLE: ROLE, MEAL: MEAL, create: create, monthBill: monthBill, sessionFee: sessionFee,
     billable: billable, billMinutes: billMinutes, dist: dist, dow: dow, money: money, isT: isT, list: list, min: min, hhmm: hhmm };
 })();
 if (typeof module !== 'undefined') module.exports = HT;

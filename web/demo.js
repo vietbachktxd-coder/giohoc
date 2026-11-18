@@ -28,6 +28,15 @@ var DEMO = (function () {
     db.update('courses', c[0].id, { rate: 200000 });
     db.update('courses', c[1].id, { rate: 250000 });
     db.update('users', db.all('users')[0].id, { mustChange: '0' });
+    db.update('students', s.id, { school: 'THCS Nhơn Trạch' });
+    var tt = [['Toán', 'Thầy Minh'], ['Ngữ văn', 'Cô Lan'], ['Tiếng Anh', 'Cô Hoa'], ['Vật lý', 'Thầy Hùng'], ['Hóa học', 'Cô Mai'], ['Sinh học', 'Cô Thu'], ['Lịch sử', 'Thầy Nam'], ['Thể dục', 'Thầy Tâm']];
+    [['07:00', '07:45'], ['07:50', '08:35'], ['08:50', '09:35'], ['09:40', '10:25']].forEach(function (h, k) {
+      for (var d = 1; d <= 6; d++) { var x = tt[(d * 3 + k) % tt.length]; db.insert('timetable', { id: env.uid(), studentId: s.id, d: d, start: h[0], end: h[1], subject: x[0], teacher: x[1], room: 'Phòng 8A', note: '' }); }
+    });
+    var mn = { sang: ['Bánh mì trứng, sữa', 'Phở bò', 'Xôi gà', 'Bún riêu', 'Cháo thịt bằm', 'Bánh cuốn', 'Hủ tiếu'],
+      trua: ['Cơm, cá kho, canh chua', 'Cơm, thịt rang, canh rau ngót', 'Cơm, gà luộc, canh bí', 'Cơm, đậu sốt cà, trứng', 'Cơm, tôm rim, canh cải', 'Cơm, bò xào, canh mồng tơi', 'Cơm gà xối mỡ'],
+      toi: ['Cơm, sườn xào chua ngọt', 'Bún chả', 'Cơm, cá chiên, rau luộc', 'Mì xào bò', 'Cơm, thịt kho trứng', 'Lẩu nấm', 'Cơm, canh chua cá lóc'] };
+    for (var d2 = 1; d2 <= 7; d2++) Object.keys(mn).forEach(function (m) { db.insert('menus', { id: env.uid(), studentId: '', d: d2, meal: m, dishes: mn[m][d2 - 1], note: '' }); });
     var t = new Date(); t.setDate(1); t.setMonth(t.getMonth() - 1);
     var today = now().date;
     while (true) {

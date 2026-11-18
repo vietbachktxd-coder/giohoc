@@ -80,7 +80,7 @@ function viewLogin() {
       <label class="chk"><input type="checkbox" id="rem" ${LS.get('remember', true) ? 'checked' : ''}>Ghi nhớ đăng nhập trên máy này</label>
       <div style="height:8px"></div>
       <button class="btn p big w" id="go" type="submit">Đăng nhập</button>
-      <button class="btn o w" id="reg" type="button" style="margin-top:8px">📝 Đăng ký tài khoản mới</button>
+      <button class="btn o w" id="reg" type="button" style="margin-top:8px">🆕 Tạo tài khoản mới (miễn phí)</button>
       ${noServer ? '<div class="info">Chưa nối máy chủ. Bấm <b>Dùng thử</b> để xem phần mềm với dữ liệu mẫu.</div>' : ''}
     </form>
     <div class="row" style="justify-content:space-between">
@@ -101,15 +101,16 @@ function viewLogin() {
   };
   $('#reg').onclick = () => {
     if (!apiUrl() && !S.demo) return toast('Chưa có địa chỉ máy chủ', 'er');
-    modal(`${head('Đăng ký tài khoản')}<p class="mu sm">Sau khi đăng ký, phụ huynh (quản trị) duyệt thì đăng nhập được.</p>
-      <label>Bạn là</label><select id="role"><option value="hs">Học sinh</option><option value="gv">Giáo viên</option><option value="ph">Phụ huynh</option></select>
-      <label>Họ tên</label><input id="name"><label>Số điện thoại</label><input id="phone" inputmode="tel">
+    modal(`${head('Tạo tài khoản mới')}<p class="mu sm">Mỗi tài khoản có kho dữ liệu riêng (học sinh, lịch học, học phí…), không ai khác xem được. Sau đó bạn tự tạo tài khoản cho thầy cô, con trong tab Quản lý.</p>
+      <label>Họ tên của bạn</label><input id="name" autocomplete="name"><label>Tên con / học sinh</label><input id="child" placeholder="VD: Bé An">
       <label>Tên đăng nhập (không dấu, không cách)</label><input id="username" autocapitalize="off" autocomplete="username">
       <label>Mật khẩu (≥ 6 ký tự)</label><input id="password" type="password" autocomplete="new-password">
-      <div style="height:12px"></div><button class="btn p w" id="sv">Gửi đăng ký</button>`, el => {
+      <div style="height:12px"></div><button class="btn p w" id="sv">Tạo tài khoản & vào ngay</button>`, el => {
       el.querySelector('#sv').onclick = async e => {
-        busy(e.target, true); const r = await api('register', { role: val(el, 'role'), name: val(el, 'name'), phone: val(el, 'phone'), username: val(el, 'username'), password: val(el, 'password') }); busy(e.target, false);
-        if (!r.ok) return toast(r.error, 'er'); closeModal(); toast(r.msg, 'ok'); $('#u').value = val(el, 'username');
+        busy(e.target, true); const r = await api('register', { name: val(el, 'name'), child: val(el, 'child'), username: val(el, 'username'), password: val(el, 'password') }); busy(e.target, false);
+        if (!r.ok) return toast(r.error, 'er'); closeModal(); toast(r.msg, 'ok'); LS.set('lastUser', val(el, 'username'));
+        try { if (window.PasswordCredential) navigator.credentials.store(new PasswordCredential({ id: val(el, 'username'), password: val(el, 'password'), name: val(el, 'name') })); } catch (x) { }
+        S.tab = 'setup'; setLogin(r); S.tab = 'setup';
       };
     });
   };
@@ -125,7 +126,7 @@ function viewLogin() {
 function setLogin(r) {
   S.token = r.token; S.me = r.me; LS.set('me', r.me); LS.set('demo', S.demo);
   if (LS.get('remember', true)) LS.set('token', r.token); else { LS.del('token'); sessionStorage.setItem('gh_token', r.token); }
-  S.tab = 'home'; start();
+  if (S.tab !== 'setup') S.tab = 'home'; start();
   if (r.me.mustChange) setTimeout(() => changePass(true), 400);
 }
 async function logout(silent) {
@@ -154,6 +155,7 @@ async function reload(quiet) {
   if (!r.ok) { if (!quiet) toast(r.error, 'er'); return false; }
   S.data = r; S.me = r.me; LS.set('me', r.me);
   S.data.allStudents = r.students; S.data.students = r.students.filter(x => isT(x.active));
+  if (!S.demo) try { LS.set('cache_' + r.me.id, r); } catch (e) { }
   S.data.courses.forEach((c, i) => { if (!c.color) c.color = COLORS[i % COLORS.length]; });
   syncNative();
   return true;
@@ -183,6 +185,8 @@ async function start() {
   document.querySelectorAll('nav button').forEach(b => b.onclick = () => go(b.dataset.t));
   $('#rf').onclick = async () => { $('#rf').textContent = '⏳'; await reload(); S.bill = S.sum = null; render(); $('#rf').textContent = '⟳'; };
   $('#bell').onclick = showNotifs;
+  const cached = LS.get('cache_' + (S.me && S.me.id), null);
+  if (cached && !S.demo) { S.data = cached; render(); reload(true).then(ok => { if (ok && !$('#modal').innerHTML) render(); }); setTimeout(iosGuide, 800); return; }
   if (await reload()) { render(); setTimeout(iosGuide, 800); } else $('#v').innerHTML = `<div class="empty">Không tải được dữ liệu.<br><br><button class="btn p" onclick="start()">Thử lại</button></div>`;
 }
 function go(t) { S.tab = t; LS.set('tab', t); render(); scrollTo(0, 0); }
@@ -243,8 +247,8 @@ function vHome(hdr) {
       <div class="row gap" style="flex-direction:column;align-items:stretch">${isOpen ? '' : `<button class="btn ok" data-in="${x.c.id}|${x.sid}">▶ Bắt đầu</button>`}
       ${S.me.role !== 'hs' && !isOpen ? `<button class="btn o s" data-abs="${x.c.id}|${x.sid}">Vắng…</button>` : ''}</div></div>`;
   };
-  html += `<div class="card"><h3>📅 Lịch học hôm nay</h3>${planned.length ? planned.map(x => card(x, true)).join('') : '<div class="empty">Hôm nay không có lịch học</div>'}</div>`;
-  if (others.length) html += `<div class="card"><h3>➕ Học thêm / học bù</h3>${others.map(x => card(x, false)).join('')}</div>`;
+  html += planned.length ? `<div class="card"><h3>📅 Học thêm hôm nay</h3>${planned.map(x => card(x, true)).join('')}</div>` : '<div class="card mu sm">📅 Hôm nay không có lịch học thêm</div>';
+  if (others.length) html += `<details class="card"><summary class="b">➕ Học bù / học thêm ngoài lịch (${others.length})</summary>${others.map(x => card(x, false)).join('')}</details>`;
   if (!P.length) html += `<div class="card empty">Chưa có lớp học nào${S.me.role === 'ph' ? '. Vào <b>Quản lý → Lớp học</b> để tạo lớp.' : ''}</div>`;
   // Lịch 7 ngày tới
   let up = '';
@@ -254,7 +258,7 @@ function vHome(hdr) {
     l.sort((a, b) => a.t < b.t ? -1 : 1);
     if (l.length) up += `<div class="item"><div style="width:68px" class="b sm">${WDS[ww]} ${dmy(dd).slice(0, 5)}</div><div class="f sm">${l.map(z => `<div><span style="color:${z.x.c.color}">●</span> ${z.t} ${h(z.x.c.name)}${multiStudent() ? ' · ' + h(SN(z.x.sid)) : ''}</div>`).join('')}</div></div>`;
   }
-  if (up) html += `<div class="card"><h3>🗓 7 ngày tới</h3>${up}</div>`;
+  if (up) html += `<details class="card"><summary class="b">🗓 Lịch 7 ngày tới</summary>${up}</details>`;
   $('#v').innerHTML = html; bindViews();
   $('#add').onclick = () => sessionForm(null);
   document.querySelectorAll('[data-in]').forEach(b => b.onclick = () => { const [cid, sid] = b.dataset.in.split('|'); checkIn(cid, sid, b); });
@@ -322,7 +326,7 @@ function sessionForm(s) {
     <div id="sw"></div>
     <div class="g2"><div><label>Ngày</label><input id="d" type="date" value="${s.date}" max="${today()}"></div><div><label>Trạng thái</label><select id="st">${stOpts}</select></div></div>
     <div class="g2" id="tm"><div><label>Bắt đầu</label><input id="a" type="time" value="${s.start || ''}"></div><div><label>Kết thúc</label><input id="b" type="time" value="${s.end || ''}"></div></div>
-    ${me.role === 'ph' ? `<label>Đơn giá áp dụng cho buổi này (đ) — để trống = theo lớp</label><input id="rt" inputmode="numeric" value="${s.rate != null && s.rate !== '' ? s.rate : ''}">` : ''}
+    ${me.role === 'ph' ? `<label>Đơn giá áp dụng cho buổi này (đ) — để trống = theo lớp</label><input id="rt" class="money" inputmode="numeric" value="${s.rate != null && s.rate !== '' ? fmtN(s.rate) : ''}">` : ''}
     <label>Ghi chú</label><input id="nt" value="${h(s.note || '')}">
     ${!isNew ? `<p class="mu sm">Tạo: ${h((s.createdAt || '').replace('T', ' '))}${s.inDist !== '' && s.inDist != null ? ' · cách nơi học ' + s.inDist + ' m' : ''}${isT(s.confirmed) ? ' · ✔ GV đã xác nhận' : ''}</p>` : ''}
     <div style="height:12px"></div>
@@ -337,7 +341,7 @@ function sessionForm(s) {
     const sv = el.querySelector('#sv');
     if (sv) sv.onclick = async () => {
       const x = { id: s.id, courseId: val(el, 'c'), studentId: val(el, 's'), date: val(el, 'd'), status: val(el, 'st'), start: val(el, 'a'), end: val(el, 'b'), note: val(el, 'nt') };
-      if (me.role === 'ph') x.rate = val(el, 'rt').replace(/\D/g, '');
+      if (me.role === 'ph') x.rate = val(el, 'rt') ? String(parseN(val(el, 'rt'))) : '';
       busy(sv, true); const r = await api('saveSession', { session: x }); busy(sv, false);
       if (!r.ok) return toast(r.error, 'er'); closeModal(); toast('Đã lưu', 'ok'); S.bill = S.sum = null; await reload(); render();
     };
@@ -689,11 +693,11 @@ function viewBill(b) {
 function payForm(b, type) {
   const c = b.feeId ? { name: b.name } : C(b.courseId);
   modal(`${head(type === 'dc' ? 'Điều chỉnh học phí' : 'Ghi nhận thanh toán')}<div class="mu">${h(c.name)} · ${h(SN(b.studentId))} · ${mLabel(S.month)}</div>
-    <label>${type === 'dc' ? 'Số tiền (+ thu thêm, − giảm trừ)' : 'Số tiền (đ)'}</label><input id="am" inputmode="numeric" value="${type === 'tt' && b.due > 0 ? b.due : ''}">
+    <label>${type === 'dc' ? 'Số tiền (+ thu thêm, − giảm trừ)' : 'Số tiền (đ)'}</label><input id="am" class="money" inputmode="numeric" value="${type === 'tt' && b.due > 0 ? fmtN(b.due) : ''}">
     ${type === 'tt' ? `<div class="g2"><div><label>Ngày trả</label><input id="dt" type="date" value="${today()}"></div><div><label>Hình thức</label><select id="me"><option>Chuyển khoản</option><option>Tiền mặt</option></select></div></div>` : ''}
     <label>Ghi chú</label><input id="nt" placeholder="${type === 'dc' ? 'VD: tiền tài liệu, giảm giá…' : ''}"><div style="height:14px"></div><button class="btn p w" id="sv">Lưu</button>`, el => {
     el.querySelector('#sv').onclick = async e => {
-      const am = Number(val(el, 'am').replace(/[^\d-]/g, ''));
+      const am = parseN(val(el, 'am'));
       busy(e.target, true);
       const r = await api('savePayment', { payment: { courseId: b.courseId, feeId: b.feeId, studentId: b.studentId, month: S.month, type, amount: am, date: val(el, 'dt'), method: val(el, 'me'), note: val(el, 'nt') } });
       busy(e.target, false); if (!r.ok) return toast(r.error, 'er');
@@ -813,7 +817,7 @@ async function vSchool() {
 /* ---------------- TAB QUẢN LÝ ---------------- */
 function vMore() {
   const ph = S.me.role === 'ph';
-  const pend = ph ? S.data.users.filter(u => !u.active && !u.mustChange).length : 0;
+  const pend = 0;
   let html = `<div class="card row"><span style="font-size:30px">${S.me.role === 'ph' ? '👨‍👩‍👧' : S.me.role === 'gv' ? '👩‍🏫' : '🧒'}</span><div class="f"><b>${h(S.me.name)}</b><div class="mu">${ROLE[S.me.role]} · ${h(S.me.username)}</div></div></div>`;
   if (pend) html += `<div class="card warn" id="pend" style="cursor:pointer">🆕 <b>${pend}</b> tài khoản đăng ký mới đang chờ duyệt ›</div>`;
   if (ph) html += `<div class="card"><h3>Người dùng & dữ liệu</h3><div class="list-a">
@@ -849,8 +853,9 @@ function iosGuide(force) {
     <button class="btn p w" data-x>Đã hiểu</button>`);
 }
 
-function courseList() {
-  modal(`${head('Lớp học')}<div class="list-a">${S.data.courses.map(c => `<div data-c="${c.id}"><span class="bar" style="background:${c.color};height:34px"></span><div class="f"><b>${h(c.name)}</b>${isT(c.active) ? '' : ' <span class="chip">Ngừng</span>'}<div class="mu">${h(c.teacher || '')} · ${MODE[c.mode]} ${modeText(c)}<br>${(c.schedule || []).map(z => WDS[z.d] + ' ' + z.t).join(', ') || 'Chưa có lịch'}</div></div>›</div>`).join('')}</div>
+function courseList(sid) {
+  S.cSid = sid || '';
+  modal(`${head('📚 Lớp học thêm')}<div class="list-a">${S.data.courses.filter(c => !sid || HT.list(c.studentIds).includes(sid)).map(c => `<div data-c="${c.id}"><span class="bar" style="background:${c.color};height:34px"></span><div class="f"><b>${h(c.name)}</b>${isT(c.active) ? '' : ' <span class="chip">Ngừng</span>'}<div class="mu">${h(c.teacher || '')} · ${MODE[c.mode]} ${modeText(c)}<br>${(c.schedule || []).map(z => WDS[z.d] + ' ' + z.t).join(', ') || 'Chưa có lịch'}</div></div>›</div>`).join('')}</div>
     <div style="height:10px"></div><button class="btn p w" id="nw">＋ Thêm lớp học</button>`, el => {
     el.querySelectorAll('[data-c]').forEach(d => d.onclick = () => courseForm(S.data.courses.find(c => c.id === d.dataset.c)));
     el.querySelector('#nw').onclick = () => courseForm(null);
@@ -858,12 +863,13 @@ function courseList() {
 }
 function courseForm(c) {
   const isNew = !c;
-  c = c || { name: '', teacher: '', mode: 'gio', rate: '', monthlyFee: '', roundMin: 15, minMin: 0, defaultMin: 90, schedule: [], studentIds: S.data.students.map(s => s.id).join(','),
+  c = c || { name: '', teacher: '', mode: 'buoi', rate: '', monthlyFee: '', roundMin: 15, minMin: 0, defaultMin: 90, schedule: [], studentIds: S.cSid || S.data.students.map(s => s.id).join(','),
     chargeExcused: '0', chargeUnexcused: '1', radius: 150, requireGps: '0', active: '1', color: COLORS[S.data.courses.length % COLORS.length] };
   const sch = (c.schedule || []).slice(), sids = HT.list(c.studentIds);
   modal(`${head(isNew ? 'Thêm lớp học' : 'Sửa lớp học')}
-    <label>Tên lớp / môn</label><input id="name" value="${h(c.name)}" placeholder="VD: Tiếng Anh">
-    <div class="g2"><div><label>Giáo viên</label><input id="teacher" value="${h(c.teacher || '')}"></div><div><label>SĐT giáo viên</label><input id="teacherPhone" inputmode="tel" value="${h(c.teacherPhone || '')}"></div></div>
+    <label>Tên lớp / môn</label><input id="name" value="${h(c.name)}" placeholder="VD: Tiếng Anh">${chips((S.data.subjects || []).slice(0, 12).map(m => ({ v: m.name })), 'data-cn', [c.name])}
+    <label>Giáo viên</label><input id="teacher" list="tL3" value="${h(c.teacher || '')}"><datalist id="tL3">${(S.data.teachers || []).map(z => `<option value="${h(z.name)}">`).join('')}</datalist>${chips((S.data.teachers || []).map(t => ({ v: t.name })), 'data-ct', [c.teacher])}
+    <div class="g2"><div><label>SĐT giáo viên</label><input id="teacherPhone" inputmode="tel" value="${h(c.teacherPhone || '')}"></div><div></div></div>
     <div class="g2"><div><label>Nơi học</label><input id="place" value="${h(c.place || '')}"></div><div><label>Màu</label><input id="color" type="color" value="${c.color || '#2563eb'}" style="height:44px;padding:4px"></div></div>
     <label>Cách tính học phí</label><select id="mode">${Object.keys(MODE).map(k => `<option value="${k}" ${c.mode === k ? 'selected' : ''}>${MODE[k]}</option>`).join('')}</select>
     <div id="mw"></div>
@@ -880,8 +886,8 @@ function courseForm(c) {
     <div style="height:14px"></div><div class="row">${isNew ? '' : '<button class="btn er" id="del">Xóa</button>'}<button class="btn p f" id="sv">Lưu lớp học</button></div>`, el => {
     const mw = () => {
       const m = val(el, 'mode');
-      el.querySelector('#mw').innerHTML = m === 'thang' ? `<label>Học phí trọn gói / tháng (đ)</label><input id="monthlyFee" inputmode="numeric" value="${h(c.monthlyFee || '')}">` :
-        `<label>Đơn giá ${m === 'gio' ? 'mỗi giờ' : 'mỗi buổi'} (đ)</label><input id="rate" inputmode="numeric" value="${h(c.rate || '')}">` +
+      el.querySelector('#mw').innerHTML = m === 'thang' ? `<label>Học phí trọn gói / tháng (đ)</label><input id="monthlyFee" class="money" inputmode="numeric" value="${fmtN(c.monthlyFee || '')}">` :
+        `<label>Đơn giá ${m === 'gio' ? 'mỗi giờ' : 'mỗi buổi'} (đ)</label><input id="rate" class="money" inputmode="numeric" value="${fmtN(c.rate || '')}">` +
         (m === 'gio' ? `<div class="g3" style="grid-template-columns:1fr 1fr 1fr"><div><label>Làm tròn (phút)</label><select id="roundMin">${[0, 5, 10, 15, 30].map(x => `<option ${+c.roundMin === x ? 'selected' : ''}>${x}</option>`).join('')}</select></div>
           <div><label>Tối thiểu (phút)</label><input id="minMin" inputmode="numeric" value="${c.minMin || 0}"></div><div><label>Buổi vắng tính (phút)</label><input id="defaultMin" inputmode="numeric" value="${c.defaultMin || 90}"></div></div>` : '');
     };
@@ -892,17 +898,22 @@ function courseForm(c) {
       el.querySelectorAll('[data-rm]').forEach(x => x.onclick = () => { sch.splice(+x.dataset.rm, 1); drawS(); });
     };
     mw(); drawS(); el.querySelector('#mode').onchange = mw;
+    el.querySelectorAll('[data-cn]').forEach(b => b.onclick = () => { el.querySelector('#name').value = b.dataset.cn; el.querySelectorAll('[data-cn]').forEach(z => z.classList.toggle('on', z === b)); });
+    el.querySelectorAll('[data-ct]').forEach(b => b.onclick = () => { const t = (S.data.teachers || []).find(z => z.name === b.dataset.ct) || {}; el.querySelector('#teacher').value = b.dataset.ct; if (t.phone) el.querySelector('#teacherPhone').value = t.phone; el.querySelectorAll('[data-ct]').forEach(z => z.classList.toggle('on', z === b)); });
     el.querySelector('#addS').onclick = () => { sch.push({ d: 1, t: '18:00', m: 90 }); drawS(); };
     el.querySelector('#here').onclick = async e => { busy(e.target, true); const p = await getPos(); busy(e.target, false); if (!p) return toast('Không lấy được vị trí. Bật GPS và cho phép quyền vị trí.', 'er'); el.querySelector('#lat').value = p.lat.toFixed(6); el.querySelector('#lng').value = p.lng.toFixed(6); toast('Đã lấy vị trí (sai số ~' + Math.round(p.acc) + ' m)', 'ok'); };
     el.querySelector('#sv').onclick = async e => {
-      const x = { id: c.id, schedule: sch.filter(z => z.t), studentIds: [...el.querySelectorAll('.sid:checked')].map(i => i.value) };
-      ['name', 'teacher', 'teacherPhone', 'place', 'color', 'mode', 'rate', 'monthlyFee', 'roundMin', 'minMin', 'defaultMin', 'chargeExcused', 'chargeUnexcused', 'lat', 'lng', 'radius', 'requireGps', 'active', 'note'].forEach(k => { const v = val(el, k); if (el.querySelector('#' + k)) x[k] = typeof v === 'string' && ['rate', 'monthlyFee'].includes(k) ? v.replace(/\D/g, '') : v; });
+      const x = { id: c.id || cid(), schedule: sch.filter(z => z.t), studentIds: [...el.querySelectorAll('.sid:checked')].map(i => i.value) };
+      ['name', 'teacher', 'teacherPhone', 'place', 'color', 'mode', 'rate', 'monthlyFee', 'roundMin', 'minMin', 'defaultMin', 'chargeExcused', 'chargeUnexcused', 'lat', 'lng', 'radius', 'requireGps', 'active', 'note'].forEach(k => { const v = val(el, k); if (el.querySelector('#' + k)) x[k] = typeof v === 'string' && ['rate', 'monthlyFee'].includes(k) ? String(parseN(v)) : v; });
       if (x.mode !== 'thang' && !+x.rate && !(await confirmBox('Chưa nhập đơn giá — học phí sẽ tính bằng 0 đ. Vẫn lưu?', 'Vẫn lưu'))) return;
-      busy(e.target, true); const r = await api('saveCourse', { course: x }); busy(e.target, false);
-      if (!r.ok) return toast(r.error, 'er'); toast('Đã lưu lớp học', 'ok'); S.bill = S.sum = null; await reload(); render(); courseList();
+      if (!x.name) return toast('Nhập tên lớp', 'er');
+      ['chargeExcused', 'chargeUnexcused', 'requireGps', 'active'].forEach(k => x[k] = x[k] ? '1' : '0');
+      mut('saveCourse', { course: x }, () => upsert('courses', Object.assign({}, x, { studentIds: x.studentIds.join(',') })));
+      if (x.teacher && !(S.data.teachers || []).some(t => t.name === x.teacher)) { const t = { id: cid(), name: x.teacher, phone: x.teacherPhone, subject: x.name, note: '' }; mut('saveCat', { table: 'teachers', item: t }, () => upsert('teachers', t)); }
+      toast('Đã lưu lớp học', 'ok'); render(); courseList(S.cSid);
     };
     const del = el.querySelector('#del');
-    if (del) del.onclick = async () => { if (!(await confirmBox(`Xóa lớp <b>${h(c.name)}</b>? (Nếu đã có buổi học, lớp chỉ chuyển sang “Ngừng” để giữ lịch sử.)`, 'Xóa'))) return; const r = await api('deleteCourse', { id: c.id }); if (!r.ok) return toast(r.error, 'er'); toast(r.archived ? 'Đã chuyển lớp sang Ngừng' : 'Đã xóa', 'ok'); await reload(); render(); courseList(); };
+    if (del) del.onclick = async () => { if (!(await confirmBox(`Xóa lớp <b>${h(c.name)}</b>? (Nếu đã có buổi học, lớp chỉ chuyển sang “Ngừng” để giữ lịch sử.)`, 'Xóa'))) return; mut('deleteCourse', { id: c.id }, () => upsert('courses', { id: c.id, active: '0' })); render(); courseList(S.cSid); };
   });
 }
 function subjectList() {
@@ -994,4 +1005,4 @@ window.__nativeResume = () => { if (S.token && S.data) reload(true).then(ok => {
 window.__nativeOpen = k => { if (k === 'notifs' && S.data) showNotifs(); };
 
 if ('serviceWorker' in navigator && !NATIVE && location.protocol === 'https:') navigator.serviceWorker.register('sw.js').catch(() => { });
-if (S.token && S.me) start(); else viewLogin();
+

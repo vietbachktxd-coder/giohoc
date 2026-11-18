@@ -36,6 +36,9 @@ var DEMO = (function () {
     var mn = { sang: ['Bánh mì trứng, sữa', 'Phở bò', 'Xôi gà', 'Bún riêu', 'Cháo thịt bằm', 'Bánh cuốn', 'Hủ tiếu'],
       trua: ['Cơm, cá kho, canh chua', 'Cơm, thịt rang, canh rau ngót', 'Cơm, gà luộc, canh bí', 'Cơm, đậu sốt cà, trứng', 'Cơm, tôm rim, canh cải', 'Cơm, bò xào, canh mồng tơi', 'Cơm gà xối mỡ'],
       toi: ['Cơm, sườn xào chua ngọt', 'Bún chả', 'Cơm, cá chiên, rau luộc', 'Mì xào bò', 'Cơm, thịt kho trứng', 'Lẩu nấm', 'Cơm, canh chua cá lóc'] };
+    ['Toán', 'Ngữ văn', 'Tiếng Anh', 'Vật lý', 'Hóa học', 'Sinh học', 'Lịch sử', 'Thể dục'].forEach(function (n, i) { db.insert('subjects', { id: env.uid(), tid: '', name: n, teacher: '', room: 'Phòng 8A', color: '#64748b', note: '' }); });
+    [['Cô Tú Hảo', 'Tiếng Anh'], ['Thầy Gia Khiêm', 'Toán – Lý – Hóa'], ['Thầy Minh', 'Toán'], ['Cô Lan', 'Ngữ văn']].forEach(function (t) { db.insert('teachers', { id: env.uid(), tid: '', name: t[0], subject: t[1], phone: '', note: '' }); });
+    [['Phở bò', 'sang'], ['Xôi gà', 'sang'], ['Cơm trắng', 'trua'], ['Cá kho', 'trua'], ['Canh chua', 'trua'], ['Sữa chua', 'xe'], ['Thịt kho trứng', 'toi'], ['Rau luộc', 'toi']].forEach(function (d) { db.insert('dishes', { id: env.uid(), tid: '', name: d[0], meal: d[1] }); });
     var m0 = now().date.slice(0, 4) + '-09';
     db.insert('schoolfees', { id: env.uid(), studentId: s.id, name: 'Tiền bán trú', amount: 850000, cycle: 'thang', from: m0 > now().date ? (+m0.slice(0, 4) - 1) + '-09' : m0, to: '', note: '', active: '1' });
     db.insert('schoolfees', { id: env.uid(), studentId: s.id, name: 'Học phí tiếng Anh tăng cường', amount: 300000, cycle: 'thang', from: m0 > now().date ? (+m0.slice(0, 4) - 1) + '-09' : m0, to: '', note: '', active: '1' });

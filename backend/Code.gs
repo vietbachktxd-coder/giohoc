@@ -7,21 +7,23 @@
  * env = { db:{all,insert,update,remove}, now:()=>({date,time,iso,ms}), hash:(s)=>hex, uid:()=>string }
  * ========================================================================== */
 var HT = (function () {
-  var VERSION = '1.4.0';
+  var VERSION = '1.5.0';
 
   var SCHEMA = {
-    users: ['id', 'username', 'name', 'role', 'pass', 'studentId', 'courseIds', 'phone', 'active', 'mustChange', 'createdAt', 'prefs', 'fails', 'lockUntil'],
-    students: ['id', 'name', 'grade', 'note', 'color', 'active', 'school', 'schoolLat', 'schoolLng'],
-    timetable: ['id', 'studentId', 'd', 'start', 'end', 'subject', 'teacher', 'room', 'note'],
-    menus: ['id', 'studentId', 'd', 'meal', 'dishes', 'note'],
-    subjects: ['id', 'name', 'teacher', 'room', 'color', 'note'],
-    schoolfees: ['id', 'studentId', 'name', 'amount', 'cycle', 'from', 'to', 'note', 'active'],
-    courses: ['id', 'name', 'subject', 'teacher', 'teacherPhone', 'place', 'mode', 'rate', 'monthlyFee', 'roundMin', 'minMin',
+    users: ['id', 'tid', 'username', 'name', 'role', 'pass', 'studentId', 'courseIds', 'phone', 'active', 'mustChange', 'createdAt', 'prefs', 'fails', 'lockUntil'],
+    students: ['id', 'tid', 'name', 'grade', 'note', 'color', 'active', 'school', 'schoolLat', 'schoolLng'],
+    timetable: ['id', 'tid', 'studentId', 'd', 'start', 'end', 'subject', 'teacher', 'room', 'note'],
+    menus: ['id', 'tid', 'studentId', 'd', 'meal', 'dishes', 'note'],
+    teachers: ['id', 'tid', 'name', 'phone', 'subject', 'note'],
+    dishes: ['id', 'tid', 'name', 'meal'],
+    subjects: ['id', 'tid', 'name', 'teacher', 'room', 'color', 'note'],
+    schoolfees: ['id', 'tid', 'studentId', 'name', 'amount', 'cycle', 'from', 'to', 'note', 'active'],
+    courses: ['id', 'tid', 'name', 'subject', 'teacher', 'teacherPhone', 'place', 'mode', 'rate', 'monthlyFee', 'roundMin', 'minMin',
       'defaultMin', 'schedule', 'studentIds', 'chargeExcused', 'chargeUnexcused', 'lat', 'lng', 'radius', 'requireGps', 'color', 'active', 'note'],
-    sessions: ['id', 'courseId', 'studentId', 'date', 'start', 'end', 'minutes', 'status', 'mode', 'rate', 'note',
+    sessions: ['id', 'tid', 'courseId', 'studentId', 'date', 'start', 'end', 'minutes', 'status', 'mode', 'rate', 'note',
       'inBy', 'outBy', 'inLat', 'inLng', 'inDist', 'confirmed', 'confirmedBy', 'confirmedAt', 'createdAt', 'updatedAt'],
-    payments: ['id', 'courseId', 'feeId', 'studentId', 'month', 'type', 'amount', 'date', 'method', 'note', 'by', 'createdAt'],
-    notifs: ['id', 'to', 'title', 'body', 'at'],
+    payments: ['id', 'tid', 'courseId', 'feeId', 'studentId', 'month', 'type', 'amount', 'date', 'method', 'note', 'by', 'createdAt'],
+    notifs: ['id', 'tid', 'to', 'title', 'body', 'at'],
     tokens: ['token', 'userId', 'createdAt', 'device', 'exp'],
     config: ['key', 'value']
   };
@@ -112,14 +114,20 @@ var HT = (function () {
 
   /* ---------------- máy xử lý ---------------- */
   function create(env) {
-    var db = env.db, T = {};
-    function all(t) { return T[t] || (T[t] = db.all(t)); }
+    /* Mỗi tài khoản đăng ký = 1 kho dữ liệu riêng (tid). Mọi truy vấn chỉ thấy dữ liệu của kho mình. */
+    var db = env.db, T = {}, RAW = {}, TID = '';
+    var SHARED = { tokens: 1, config: 1 };
+    function raw(t) { return RAW[t] || (RAW[t] = db.all(t)); }
+    function all(t) { if (SHARED[t]) return raw(t); return T[t] || (T[t] = raw(t).filter(function (r) { return str(r.tid) === TID; })); }
+    function setTid(t) { TID = str(t); T = {}; }
     function find(t, id) { var a = all(t); for (var i = 0; i < a.length; i++) if (a[i].id === id) return a[i]; return null; }
-    function ins(t, o) { o.id = o.id || env.uid(); db.insert(t, o); if (T[t]) T[t].push(o); return o; }
+    function newId(id) { id = str(id); return /^[a-z0-9]{8,24}$/i.test(id) && !raw('sessions').concat(raw('courses'), raw('students')).some(function (r) { return r.id === id; }) ? id : env.uid(); }
+    function ins(t, o) { o.id = o.id ? newId(o.id) : env.uid(); if (!SHARED[t]) o.tid = TID; db.insert(t, o); if (T[t]) T[t].push(o); if (RAW[t] && RAW[t] !== T[t]) RAW[t].push(o); return o; }
     function upd(t, o, patch) { for (var k in patch) o[k] = patch[k]; db.update(t, o.id, patch); return o; }
-    function del(t, o) { db.remove(t, o.id); if (T[t]) T[t] = T[t].filter(function (x) { return x !== o; }); }
-    function cfg(k, d) { var r = all('config').filter(function (x) { return x.key === k; })[0]; return r ? r.value : d; }
+    function del(t, o) { db.remove(t, o.id); if (T[t]) T[t] = T[t].filter(function (x) { return x !== o; }); if (RAW[t]) RAW[t] = RAW[t].filter(function (x) { return x !== o; }); }
+    function cfg(k, d) { k = TID + ':' + k; var r = all('config').filter(function (x) { return x.key === k; })[0]; if (!r && !TID) r = all('config').filter(function (x) { return x.key === k.slice(1); })[0]; return r ? r.value : d; }
     function setCfg(k, v) {
+      k = TID + ':' + k;
       var r = all('config').filter(function (x) { return x.key === k; })[0];
       if (r) { r.value = v; db.update('config', k, { value: v }, 'key'); } else { db.insert('config', { key: k, value: v }); all('config').push({ key: k, value: v }); }
     }
@@ -144,9 +152,11 @@ var HT = (function () {
 
     function auth(p) {
       var t = str(p.token); if (!t) return null;
-      var tk = all('tokens').filter(function (x) { return x.token === t; })[0]; if (!tk) return null;
+      var tk = raw('tokens').filter(function (x) { return x.token === t; })[0]; if (!tk) return null;
       if (num(tk.exp) && num(tk.exp) < env.now().ms) return null;
-      var u = find('users', tk.userId); return u && isT(u.active) ? u : null;
+      var u = raw('users').filter(function (x) { return x.id === tk.userId; })[0];
+      if (!u || !isT(u.active)) return null;
+      setTid(u.tid); return find('users', u.id);
     }
 
     var A = {};
@@ -155,7 +165,8 @@ var HT = (function () {
 
     A.login = function (p) {
       var un = str(p.username).toLowerCase();
-      var u = all('users').filter(function (x) { return str(x.username).toLowerCase() === un; })[0];
+      var u = raw('users').filter(function (x) { return str(x.username).toLowerCase() === un; })[0];
+      if (u) { setTid(u.tid); u = find('users', u.id); }
       var nowMs = env.now().ms;
       if (u && num(u.lockUntil) > nowMs) return err('Tài khoản tạm khóa 15 phút do nhập sai mật khẩu nhiều lần. Thử lại sau.');
       if (!u || !checkPass(u, str(p.password))) {
@@ -212,7 +223,7 @@ var HT = (function () {
         sessions: sessions, payments: payments, notifs: nf, unread: nf.filter(function (n) { return !since || n.at > since; }).length,
         users: me.role === 'ph' ? all('users').map(pubUser) : [],
         timetable: me.role === 'gv' ? [] : all('timetable').filter(function (t) { return canStudent(me, t.studentId); }),
-        subjects: all('subjects'),
+        subjects: all('subjects'), teachers: all('teachers'), dishes: all('dishes'),
         schoolfees: me.role === 'gv' ? [] : all('schoolfees').filter(function (f) { return canStudent(me, f.studentId); }),
         menus: me.role === 'gv' ? [] : all('menus').filter(function (m) { return !m.studentId || canStudent(me, m.studentId); })
       };
@@ -390,7 +401,7 @@ var HT = (function () {
       o.studentIds = Array.isArray(x.studentIds) ? x.studentIds.join(',') : str(x.studentIds);
       ['chargeExcused', 'chargeUnexcused', 'requireGps', 'active'].forEach(function (k) { o[k] = isT(x[k]) ? '1' : '0'; });
       var c = x.id ? find('courses', x.id) : null;
-      if (c) upd('courses', c, o); else c = ins('courses', o);
+      if (c) upd('courses', c, o); else { o.id = x.id; c = ins('courses', o); }
       return { ok: true, course: c };
     }, ['ph']);
 
@@ -405,7 +416,7 @@ var HT = (function () {
       var o = { name: str(x.name), grade: str(x.grade), note: str(x.note), color: str(x.color), active: x.active === undefined || isT(x.active) ? '1' : '0',
         school: str(x.school), schoolLat: str(x.schoolLat), schoolLng: str(x.schoolLng) };
       var s = x.id ? find('students', x.id) : null;
-      if (s) upd('students', s, o); else s = ins('students', o);
+      if (s) upd('students', s, o); else { o.id = x.id; s = ins('students', o); }
       return { ok: true, student: s };
     }, ['ph']);
 
@@ -416,7 +427,7 @@ var HT = (function () {
       if (!ROLE[x.role]) return err('Chọn vai trò');
       if (x.role === 'hs' && !str(x.studentId)) return err('Chọn học sinh gắn với tài khoản');
       var u = x.id ? find('users', x.id) : null;
-      if (all('users').some(function (o) { return o !== u && str(o.username).toLowerCase() === un; })) return err('Tên đăng nhập đã tồn tại');
+      if (raw('users').some(function (o) { return o.id !== (u && u.id) && str(o.username).toLowerCase() === un; })) return err('Tên đăng nhập đã tồn tại');
       if (u && u.id === me.id && (x.role !== 'ph' || !isT(x.active === undefined ? '1' : x.active))) return err('Không tự hạ quyền / khóa chính mình');
       var o = { username: un, name: str(x.name), role: x.role, studentId: x.role === 'hs' ? str(x.studentId) : '',
         courseIds: x.role === 'gv' ? (Array.isArray(x.courseIds) ? x.courseIds.join(',') : str(x.courseIds)) : '', phone: str(x.phone),
@@ -437,7 +448,7 @@ var HT = (function () {
       var o = { studentId: sid, d: num(x.d), start: str(x.start), end: str(x.end), subject: str(x.subject), teacher: str(x.teacher), room: str(x.room), note: str(x.note) };
       var t = x.id ? find('timetable', x.id) : null;
       if (t && !canStudent(me, t.studentId)) return err('Bạn không có quyền');
-      if (t) upd('timetable', t, o); else t = ins('timetable', o);
+      if (t) upd('timetable', t, o); else { o.id = x.id; t = ins('timetable', o); }
       return { ok: true, item: t };
     }, ['ph']);
     A.deleteTT = secured(function (p, me) { var t = find('timetable', p.id); if (t) del('timetable', t); return { ok: true }; }, ['ph']);
@@ -452,7 +463,7 @@ var HT = (function () {
       if (!/^\d{4}-\d{2}$/.test(str(x.from))) return err('Chọn tháng bắt đầu');
       var o = { studentId: x.studentId, name: str(x.name), amount: num(x.amount), cycle: x.cycle, from: str(x.from), to: str(x.to), note: str(x.note), active: x.active === undefined || isT(x.active) ? '1' : '0' };
       var f = x.id ? find('schoolfees', x.id) : null;
-      if (f) upd('schoolfees', f, o); else f = ins('schoolfees', o);
+      if (f) upd('schoolfees', f, o); else { o.id = x.id; f = ins('schoolfees', o); }
       return { ok: true, item: f };
     }, ['ph']);
     A.deleteFee = secured(function (p) {
@@ -478,7 +489,7 @@ var HT = (function () {
       if (!str(x.dishes)) return err('Nhập món ăn');
       var o = { studentId: str(x.studentId), d: num(x.d), meal: x.meal, dishes: str(x.dishes), note: str(x.note) };
       var m = x.id ? find('menus', x.id) : null;
-      if (m) upd('menus', m, o); else m = ins('menus', o);
+      if (m) upd('menus', m, o); else { o.id = x.id; m = ins('menus', o); }
       return { ok: true, item: m };
     }, ['ph']);
     A.deleteMenu = secured(function (p) { var m = find('menus', p.id); if (m) del('menus', m); return { ok: true }; }, ['ph']);
@@ -488,15 +499,20 @@ var HT = (function () {
 
     /* ---- Đăng ký tài khoản mới: chờ phụ huynh duyệt ---- */
     A.register = function (p) {
+      setTid('');
       var un = str(p.username).toLowerCase();
       if (!/^[a-z0-9._-]{3,30}$/.test(un)) return err('Tên đăng nhập 3–30 ký tự, không dấu, không cách');
       if (!str(p.name)) return err('Nhập họ tên');
       if (str(p.password).length < 6) return err('Mật khẩu tối thiểu 6 ký tự');
-      if (['gv', 'hs', 'ph'].indexOf(p.role) < 0) return err('Chọn vai trò');
-      if (all('users').some(function (o) { return str(o.username).toLowerCase() === un; })) return err('Tên đăng nhập đã có người dùng');
-      var u = ins('users', { username: un, name: str(p.name), role: p.role, pass: mkPass(str(p.password)), studentId: '', courseIds: '', phone: str(p.phone), active: '0', mustChange: '0', createdAt: env.now().iso });
-      notifyRole('ph', '🆕 Tài khoản mới chờ duyệt', u.name + ' (' + ROLE[u.role] + ', ' + un + (u.phone ? ', ' + u.phone : '') + ') vừa đăng ký. Vào Khác → Tài khoản để duyệt.');
-      return { ok: true, msg: 'Đã gửi đăng ký. Chờ phụ huynh (quản trị) duyệt rồi đăng nhập.' };
+      if (raw('users').some(function (o) { return str(o.username).toLowerCase() === un; })) return err('Tên đăng nhập đã có người dùng');
+      setTid(env.uid() + env.uid());
+      var n = env.now();
+      var u = ins('users', { username: un, name: str(p.name), role: 'ph', pass: mkPass(str(p.password)), studentId: '', courseIds: '', phone: str(p.phone), active: '1', mustChange: '0', createdAt: n.iso });
+      ins('students', { name: str(p.child) || 'Con', grade: '', note: '', color: '#2563eb', active: '1', school: '', schoolLat: '', schoolLng: '' });
+      ['Toán', 'Ngữ văn', 'Tiếng Anh', 'Khoa học tự nhiên', 'Lịch sử và Địa lý', 'GDCD', 'Tin học', 'Công nghệ', 'Giáo dục thể chất', 'Nghệ thuật'].forEach(function (x, i) { ins('subjects', { name: x, teacher: '', room: '', color: ['#e11d48', '#2563eb', '#16a34a', '#d97706', '#7c3aed', '#0891b2', '#db2777', '#65a30d'][i % 8], note: '' }); });
+      var tok = env.uid() + env.uid() + env.uid();
+      db.insert('tokens', { token: tok, userId: u.id, createdAt: n.iso, device: str(p.device).slice(0, 80), exp: n.ms + 180 * 86400000 });
+      return { ok: true, token: tok, me: pubUser(u), msg: 'Đã tạo tài khoản và kho dữ liệu riêng của bạn' };
     };
 
     /* ---- Danh mục môn học (đầu vào cho thời khóa biểu) ---- */
@@ -504,10 +520,22 @@ var HT = (function () {
       var x = p.item || {}; if (!str(x.name)) return err('Nhập tên môn');
       var o = { name: str(x.name), teacher: str(x.teacher), room: str(x.room), color: str(x.color), note: str(x.note) };
       var m = x.id ? find('subjects', x.id) : null;
-      if (m) upd('subjects', m, o); else m = ins('subjects', o);
+      if (m) upd('subjects', m, o); else { o.id = x.id; m = ins('subjects', o); }
       return { ok: true, item: m };
     }, ['ph']);
     A.deleteSubject = secured(function (p) { var m = find('subjects', p.id); if (m) del('subjects', m); return { ok: true }; }, ['ph']);
+
+    /* ---- Danh mục chọn nhanh: thầy cô, món ăn ---- */
+    var CAT = { teachers: ['name', 'phone', 'subject', 'note'], dishes: ['name', 'meal'] };
+    A.saveCat = secured(function (p) {
+      var t = p.table, x = p.item || {}; if (!CAT[t]) return err('Danh mục không hợp lệ');
+      if (!str(x.name)) return err('Nhập tên');
+      var o = {}; CAT[t].forEach(function (k) { o[k] = str(x[k]); });
+      var m = x.id ? find(t, x.id) : null;
+      if (m) upd(t, m, o); else { o.id = x.id; m = ins(t, o); }
+      return { ok: true, item: m };
+    }, ['ph']);
+    A.deleteCat = secured(function (p) { if (!CAT[p.table]) return err('Danh mục không hợp lệ'); var m = find(p.table, p.id); if (m) del(p.table, m); return { ok: true }; }, ['ph']);
 
     A.saveConfig = secured(function (p) { if (p.appName) setCfg('appName', str(p.appName).slice(0, 40)); return { ok: true }; }, ['ph']);
 

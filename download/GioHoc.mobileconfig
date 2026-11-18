@@ -1,0 +1,110 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<key>PayloadContent</key>
+	<array>
+		<dict>
+			<key>FullScreen</key>
+			<true/>
+			<key>Icon</key>
+			<data>
+			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
+			mejNqsG/lAAAAABJRU5ErkJggg==
+			</data>
+			<key>IgnoreManifestScope</key>
+			<false/>
+			<key>IsRemovable</key>
+			<true/>
+			<key>Label</key>
+			<string>Giờ học</string>
+			<key>PayloadDisplayName</key>
+			<string>Giờ học</string>
+			<key>PayloadIdentifier</key>
+			<string>vn.bach.giohoc.webclip</string>
+			<key>PayloadType</key>
+			<string>com.apple.webClip.managed</string>
+			<key>PayloadUUID</key>
+			<string>6F1C2B5E-2A41-4C8B-9D1E-6A7B3C4D5E61</string>
+			<key>PayloadVersion</key>
+			<integer>1</integer>
+			<key>URL</key>
+			<string>https://vietbachktxd-coder.github.io/giohoc/</string>
+		</dict>
+	</array>
+	<key>PayloadDescription</key>
+	<string>Cài biểu tượng ứng dụng Giờ học lên màn hình iPhone. Ứng dụng tự cập nhật khi có bản mới.</string>
+	<key>PayloadDisplayName</key>
+	<string>Giờ học – Điểm danh, lịch học, học phí</string>
+	<key>PayloadIdentifier</key>
+	<string>vn.bach.giohoc</string>
+	<key>PayloadOrganization</key>
+	<string>Giờ học</string>
+	<key>PayloadRemovalDisallowed</key>
+	<false/>
+	<key>PayloadType</key>
+	<string>Configuration</string>
+	<key>PayloadUUID</key>
+	<string>8A2D3C6F-3B52-4D9C-8E2F-7B8C4D5E6F72</string>
+	<key>PayloadVersion</key>
+	<integer>1</integer>
+</dict>
+</plist>

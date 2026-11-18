@@ -36,6 +36,9 @@ var DEMO = (function () {
     var mn = { sang: ['Bánh mì trứng, sữa', 'Phở bò', 'Xôi gà', 'Bún riêu', 'Cháo thịt bằm', 'Bánh cuốn', 'Hủ tiếu'],
       trua: ['Cơm, cá kho, canh chua', 'Cơm, thịt rang, canh rau ngót', 'Cơm, gà luộc, canh bí', 'Cơm, đậu sốt cà, trứng', 'Cơm, tôm rim, canh cải', 'Cơm, bò xào, canh mồng tơi', 'Cơm gà xối mỡ'],
       toi: ['Cơm, sườn xào chua ngọt', 'Bún chả', 'Cơm, cá chiên, rau luộc', 'Mì xào bò', 'Cơm, thịt kho trứng', 'Lẩu nấm', 'Cơm, canh chua cá lóc'] };
+    var m0 = now().date.slice(0, 4) + '-09';
+    db.insert('schoolfees', { id: env.uid(), studentId: s.id, name: 'Tiền bán trú', amount: 850000, cycle: 'thang', from: m0 > now().date ? (+m0.slice(0, 4) - 1) + '-09' : m0, to: '', note: '', active: '1' });
+    db.insert('schoolfees', { id: env.uid(), studentId: s.id, name: 'Học phí tiếng Anh tăng cường', amount: 300000, cycle: 'thang', from: m0 > now().date ? (+m0.slice(0, 4) - 1) + '-09' : m0, to: '', note: '', active: '1' });
     for (var d2 = 1; d2 <= 7; d2++) Object.keys(mn).forEach(function (m) { db.insert('menus', { id: env.uid(), studentId: '', d: d2, meal: m, dishes: mn[m][d2 - 1], note: '' }); });
     var t = new Date(); t.setDate(1); t.setMonth(t.getMonth() - 1);
     var today = now().date;

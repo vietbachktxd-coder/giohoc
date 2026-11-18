@@ -6,21 +6,22 @@
  * env = { db:{all,insert,update,remove}, now:()=>({date,time,iso,ms}), hash:(s)=>hex, uid:()=>string }
  * ========================================================================== */
 var HT = (function () {
-  var VERSION = '1.3.0';
+  var VERSION = '1.4.0';
 
   var SCHEMA = {
-    users: ['id', 'username', 'name', 'role', 'pass', 'studentId', 'courseIds', 'phone', 'active', 'mustChange', 'createdAt', 'prefs'],
+    users: ['id', 'username', 'name', 'role', 'pass', 'studentId', 'courseIds', 'phone', 'active', 'mustChange', 'createdAt', 'prefs', 'fails', 'lockUntil'],
     students: ['id', 'name', 'grade', 'note', 'color', 'active', 'school', 'schoolLat', 'schoolLng'],
     timetable: ['id', 'studentId', 'd', 'start', 'end', 'subject', 'teacher', 'room', 'note'],
     menus: ['id', 'studentId', 'd', 'meal', 'dishes', 'note'],
     subjects: ['id', 'name', 'teacher', 'room', 'color', 'note'],
+    schoolfees: ['id', 'studentId', 'name', 'amount', 'cycle', 'from', 'to', 'note', 'active'],
     courses: ['id', 'name', 'subject', 'teacher', 'teacherPhone', 'place', 'mode', 'rate', 'monthlyFee', 'roundMin', 'minMin',
       'defaultMin', 'schedule', 'studentIds', 'chargeExcused', 'chargeUnexcused', 'lat', 'lng', 'radius', 'requireGps', 'color', 'active', 'note'],
     sessions: ['id', 'courseId', 'studentId', 'date', 'start', 'end', 'minutes', 'status', 'mode', 'rate', 'note',
       'inBy', 'outBy', 'inLat', 'inLng', 'inDist', 'confirmed', 'confirmedBy', 'confirmedAt', 'createdAt', 'updatedAt'],
-    payments: ['id', 'courseId', 'studentId', 'month', 'type', 'amount', 'date', 'method', 'note', 'by', 'createdAt'],
+    payments: ['id', 'courseId', 'feeId', 'studentId', 'month', 'type', 'amount', 'date', 'method', 'note', 'by', 'createdAt'],
     notifs: ['id', 'to', 'title', 'body', 'at'],
-    tokens: ['token', 'userId', 'createdAt', 'device'],
+    tokens: ['token', 'userId', 'createdAt', 'device', 'exp'],
     config: ['key', 'value']
   };
 
@@ -122,6 +123,16 @@ var HT = (function () {
       if (r) { r.value = v; db.update('config', k, { value: v }, 'key'); } else { db.insert('config', { key: k, value: v }); all('config').push({ key: k, value: v }); }
     }
     function hash(p) { return env.hash('gh$' + p); }
+    /* Mật khẩu: muối riêng từng tài khoản + băm SHA-256 lặp nhiều lần */
+    function hash2(p, salt) { var h = salt + '|' + p; for (var i = 0; i < 300; i++) h = env.hash(h + salt); return 'v2$' + salt + '$' + h; }
+    function mkPass(p) { return hash2(p, env.uid() + env.uid()); }
+    function checkPass(u, p) {
+      var s = str(u.pass);
+      if (s.indexOf('v2$') === 0) return hash2(p, s.split('$')[1]) === s;
+      if (s === hash(p)) { upd('users', u, { pass: mkPass(p) }); return true; }
+      return false;
+    }
+    function killTokens(uid, keep) { all('tokens').filter(function (t) { return t.userId === uid && t.token !== keep; }).forEach(function (t) { db.remove('tokens', t.token, 'token'); }); }
     function pubUser(u) { return { id: u.id, username: u.username, name: u.name, role: u.role, studentId: u.studentId, courseIds: u.courseIds, phone: u.phone, active: isT(u.active), mustChange: isT(u.mustChange), prefs: json(u.prefs, {}) }; }
     function notify(to, title, body) { ins('notifs', { to: to, title: title, body: body, at: env.now().iso }); }
     function notifyRole(role, title, body, except) {
@@ -133,6 +144,7 @@ var HT = (function () {
     function auth(p) {
       var t = str(p.token); if (!t) return null;
       var tk = all('tokens').filter(function (x) { return x.token === t; })[0]; if (!tk) return null;
+      if (num(tk.exp) && num(tk.exp) < env.now().ms) return null;
       var u = find('users', tk.userId); return u && isT(u.active) ? u : null;
     }
 
@@ -143,10 +155,16 @@ var HT = (function () {
     A.login = function (p) {
       var un = str(p.username).toLowerCase();
       var u = all('users').filter(function (x) { return str(x.username).toLowerCase() === un; })[0];
-      if (!u || u.pass !== hash(str(p.password))) return err('Sai tên đăng nhập hoặc mật khẩu');
+      var nowMs = env.now().ms;
+      if (u && num(u.lockUntil) > nowMs) return err('Tài khoản tạm khóa 15 phút do nhập sai mật khẩu nhiều lần. Thử lại sau.');
+      if (!u || !checkPass(u, str(p.password))) {
+        if (u) { var f = num(u.fails) + 1; upd('users', u, f >= 5 ? { fails: 0, lockUntil: nowMs + 15 * 60000 } : { fails: f }); }
+        return err('Sai tên đăng nhập hoặc mật khẩu');
+      }
+      if (num(u.fails)) upd('users', u, { fails: 0, lockUntil: '' });
       if (!isT(u.active)) return err('Tài khoản chưa được duyệt hoặc đã bị khóa. Liên hệ phụ huynh (quản trị).');
       var tok = env.uid() + env.uid();
-      db.insert('tokens', { token: tok, userId: u.id, createdAt: env.now().iso, device: str(p.device).slice(0, 80) });
+      db.insert('tokens', { token: tok, userId: u.id, createdAt: env.now().iso, device: str(p.device).slice(0, 80), exp: nowMs + 180 * 86400000 });
       return { ok: true, token: tok, me: pubUser(u) };
     };
 
@@ -165,9 +183,12 @@ var HT = (function () {
     });
 
     A.changePass = secured(function (p, me) {
-      if (me.pass !== hash(str(p.old))) return err('Mật khẩu cũ không đúng');
-      if (str(p.pass).length < 6) return err('Mật khẩu mới tối thiểu 6 ký tự');
-      upd('users', me, { pass: hash(str(p.pass)), mustChange: '0' });
+      if (!checkPass(me, str(p.old))) return err('Mật khẩu cũ không đúng');
+      var np = str(p.pass);
+      if (np.length < 6) return err('Mật khẩu mới tối thiểu 6 ký tự');
+      if (/^(\d)\1+$|^123456|^abc123|^password/i.test(np) || np === str(p.old)) return err('Mật khẩu quá dễ đoán, hãy chọn mật khẩu khác');
+      upd('users', me, { pass: mkPass(np), mustChange: '0' });
+      killTokens(me.id, str(p.token));
       return { ok: true };
     });
 
@@ -181,7 +202,7 @@ var HT = (function () {
         return cids.indexOf(s.courseId) >= 0 && canStudent(me, s.studentId) && ((s.date >= from && s.date <= to) || (s.start && !s.end && (s.status === 'co_mat' || s.status === 'hoc_bu')));
       });
       var months = {}; sessions.forEach(function (s) { months[s.date.slice(0, 7)] = 1; });
-      var payments = all('payments').filter(function (x) { return cids.indexOf(x.courseId) >= 0 && (!x.studentId || canStudent(me, x.studentId)) && x.month >= from.slice(0, 7) && x.month <= to.slice(0, 7); });
+      var payments = all('payments').filter(function (x) { return (cids.indexOf(x.courseId) >= 0 || (x.feeId && me.role !== 'gv')) && (!x.studentId || canStudent(me, x.studentId)) && x.month >= from.slice(0, 7) && x.month <= to.slice(0, 7); });
       var since = str(p.since);
       var nf = all('notifs').filter(function (n) { return n.to === me.id; }).sort(function (a, b) { return a.at < b.at ? 1 : -1; }).slice(0, 30);
       return {
@@ -191,6 +212,7 @@ var HT = (function () {
         users: me.role === 'ph' ? all('users').map(pubUser) : [],
         timetable: me.role === 'gv' ? [] : all('timetable').filter(function (t) { return canStudent(me, t.studentId); }),
         subjects: all('subjects'),
+        schoolfees: me.role === 'gv' ? [] : all('schoolfees').filter(function (f) { return canStudent(me, f.studentId); }),
         menus: me.role === 'gv' ? [] : all('menus').filter(function (m) { return !m.studentId || canStudent(me, m.studentId); })
       };
     });
@@ -296,7 +318,7 @@ var HT = (function () {
     /* ---- Học phí ---- */
     A.bill = secured(function (p, me) {
       var month = str(p.month) || env.now().date.slice(0, 7), out = [];
-      var ss = all('sessions'), pays = all('payments');
+      var ss = all('sessions'), pays = all('payments'), pays0 = pays;
       all('courses').forEach(function (c) {
         if (!canCourse(me, c)) return;
         list(c.studentIds).forEach(function (sid) {
@@ -306,7 +328,19 @@ var HT = (function () {
           out.push(b);
         });
       });
-      return { ok: true, month: month, bills: out };
+      var school = [];
+      if (me.role !== 'gv') all('schoolfees').forEach(function (f) {
+        if (!canStudent(me, f.studentId) || !isT(f.active)) return;
+        var on = f.cycle === 'lan' ? f.from === month : (month >= str(f.from) && (!str(f.to) || month <= str(f.to)));
+        if (f.cycle === 'ky' && on) on = ((num(month.slice(5)) - num(str(f.from).slice(5)) + 12) % 6) === 0;
+        if (f.cycle === 'nam' && on) on = month.slice(5) === str(f.from).slice(5);
+        var pays = pays0.filter(function (x) { return x.feeId === f.id && x.month === month; });
+        if (!on && !pays.length) return;
+        var paid = 0, adj = 0; pays.forEach(function (x) { if (x.type === 'dc') adj += num(x.amount); else paid += num(x.amount); });
+        var total = (on ? num(f.amount) : 0) + adj;
+        school.push({ feeId: f.id, studentId: f.studentId, name: f.name, cycle: f.cycle, amount: on ? num(f.amount) : 0, adjust: adj, total: total, paid: paid, due: total - paid, pays: pays, note: f.note });
+      });
+      return { ok: true, month: month, bills: out, school: school };
     });
 
     /* Tổng hợp theo tháng trong năm (cho biểu đồ) */
@@ -332,13 +366,14 @@ var HT = (function () {
     });
 
     A.savePayment = secured(function (p) {
-      var x = p.payment || {}, c = find('courses', x.courseId); if (!c) return err('Chưa chọn lớp');
+      var x = p.payment || {}, sf = x.feeId ? find('schoolfees', x.feeId) : null, c = sf ? { id: '', name: sf.name } : find('courses', x.courseId);
+      if (!c) return err('Chưa chọn lớp / khoản thu');
       if (!/^\d{4}-\d{2}$/.test(str(x.month))) return err('Tháng không hợp lệ');
       if (!num(x.amount)) return err('Nhập số tiền');
       var n = env.now();
-      var o = ins('payments', { courseId: c.id, studentId: str(x.studentId), month: x.month, type: x.type === 'dc' ? 'dc' : 'tt', amount: num(x.amount),
+      var o = ins('payments', { courseId: c.id, feeId: sf ? sf.id : '', studentId: sf ? sf.studentId : str(x.studentId), month: x.month, type: x.type === 'dc' ? 'dc' : 'tt', amount: num(x.amount),
         date: str(x.date) || n.date, method: str(x.method), note: str(x.note), by: p.__me, createdAt: n.iso });
-      if (o.type === 'tt') teachersOf(c.id).forEach(function (t) { notify(t.id, '💰 Đã thanh toán học phí', c.name + ' tháng ' + x.month.slice(5) + '/' + x.month.slice(0, 4) + ': ' + money(o.amount) + (o.studentId ? ' (' + sName(o.studentId) + ')' : '')); });
+      if (o.type === 'tt' && !sf) teachersOf(c.id).forEach(function (t) { notify(t.id, '💰 Đã thanh toán học phí', c.name + ' tháng ' + x.month.slice(5) + '/' + x.month.slice(0, 4) + ': ' + money(o.amount) + (o.studentId ? ' (' + sName(o.studentId) + ')' : '')); });
       return { ok: true, payment: o };
     }, ['ph']);
 
@@ -385,9 +420,9 @@ var HT = (function () {
       var o = { username: un, name: str(x.name), role: x.role, studentId: x.role === 'hs' ? str(x.studentId) : '',
         courseIds: x.role === 'gv' ? (Array.isArray(x.courseIds) ? x.courseIds.join(',') : str(x.courseIds)) : '', phone: str(x.phone),
         active: x.active === undefined || isT(x.active) ? '1' : '0' };
-      if (str(x.password)) { if (str(x.password).length < 6) return err('Mật khẩu tối thiểu 6 ký tự'); o.pass = hash(str(x.password)); o.mustChange = '1'; }
-      if (u) upd('users', u, o);
-      else { if (!o.pass) { o.pass = hash('123456'); o.mustChange = '1'; } o.createdAt = env.now().iso; u = ins('users', o); }
+      if (str(x.password)) { if (str(x.password).length < 6) return err('Mật khẩu tối thiểu 6 ký tự'); o.pass = mkPass(str(x.password)); o.mustChange = '1'; }
+      if (u) { upd('users', u, o); if (o.pass || o.active === '0') killTokens(u.id); }
+      else { if (!o.pass) { o.pass = mkPass('123456'); o.mustChange = '1'; } o.createdAt = env.now().iso; u = ins('users', o); }
       return { ok: true, user: pubUser(u) };
     }, ['ph']);
 
@@ -403,8 +438,36 @@ var HT = (function () {
       if (t && !canStudent(me, t.studentId)) return err('Bạn không có quyền');
       if (t) upd('timetable', t, o); else t = ins('timetable', o);
       return { ok: true, item: t };
-    }, ['ph', 'hs']);
-    A.deleteTT = secured(function (p, me) { var t = find('timetable', p.id); if (t && canStudent(me, t.studentId)) del('timetable', t); return { ok: true }; }, ['ph', 'hs']);
+    }, ['ph']);
+    A.deleteTT = secured(function (p, me) { var t = find('timetable', p.id); if (t) del('timetable', t); return { ok: true }; }, ['ph']);
+
+    /* ---- Khoản thu chính khóa (học phí trường, bán trú, BHYT…) ---- */
+    A.saveFee = secured(function (p) {
+      var x = p.item || {};
+      if (!find('students', x.studentId)) return err('Chọn học sinh');
+      if (!str(x.name)) return err('Nhập tên khoản thu');
+      if (!(num(x.amount) > 0)) return err('Nhập số tiền');
+      if (['thang', 'ky', 'nam', 'lan'].indexOf(x.cycle) < 0) return err('Chọn chu kỳ thu');
+      if (!/^\d{4}-\d{2}$/.test(str(x.from))) return err('Chọn tháng bắt đầu');
+      var o = { studentId: x.studentId, name: str(x.name), amount: num(x.amount), cycle: x.cycle, from: str(x.from), to: str(x.to), note: str(x.note), active: x.active === undefined || isT(x.active) ? '1' : '0' };
+      var f = x.id ? find('schoolfees', x.id) : null;
+      if (f) upd('schoolfees', f, o); else f = ins('schoolfees', o);
+      return { ok: true, item: f };
+    }, ['ph']);
+    A.deleteFee = secured(function (p) {
+      var f = find('schoolfees', p.id); if (!f) return { ok: true };
+      if (all('payments').some(function (x) { return x.feeId === f.id; })) { upd('schoolfees', f, { active: '0' }); return { ok: true, archived: true }; }
+      del('schoolfees', f); return { ok: true };
+    }, ['ph']);
+    A.deleteStudent = secured(function (p) {
+      var s = find('students', p.id); if (!s) return { ok: true };
+      if (all('students').filter(function (x) { return isT(x.active); }).length <= 1 && isT(s.active)) return err('Phải còn ít nhất 1 học sinh');
+      var used = all('sessions').some(function (x) { return x.studentId === s.id; }) || all('payments').some(function (x) { return x.studentId === s.id; });
+      all('courses').forEach(function (c) { var l = list(c.studentIds); if (l.indexOf(s.id) >= 0) upd('courses', c, { studentIds: l.filter(function (i) { return i !== s.id; }).join(',') }); });
+      if (used) { upd('students', s, { active: '0' }); return { ok: true, archived: true }; }
+      all('timetable').filter(function (t) { return t.studentId === s.id; }).forEach(function (t) { del('timetable', t); });
+      del('students', s); return { ok: true };
+    }, ['ph']);
 
     /* ---- Thực đơn hằng tuần ---- */
     A.saveMenu = secured(function (p) {
@@ -430,7 +493,7 @@ var HT = (function () {
       if (str(p.password).length < 6) return err('Mật khẩu tối thiểu 6 ký tự');
       if (['gv', 'hs', 'ph'].indexOf(p.role) < 0) return err('Chọn vai trò');
       if (all('users').some(function (o) { return str(o.username).toLowerCase() === un; })) return err('Tên đăng nhập đã có người dùng');
-      var u = ins('users', { username: un, name: str(p.name), role: p.role, pass: hash(str(p.password)), studentId: '', courseIds: '', phone: str(p.phone), active: '0', mustChange: '0', createdAt: env.now().iso });
+      var u = ins('users', { username: un, name: str(p.name), role: p.role, pass: mkPass(str(p.password)), studentId: '', courseIds: '', phone: str(p.phone), active: '0', mustChange: '0', createdAt: env.now().iso });
       notifyRole('ph', '🆕 Tài khoản mới chờ duyệt', u.name + ' (' + ROLE[u.role] + ', ' + un + (u.phone ? ', ' + u.phone : '') + ') vừa đăng ký. Vào Khác → Tài khoản để duyệt.');
       return { ok: true, msg: 'Đã gửi đăng ký. Chờ phụ huynh (quản trị) duyệt rồi đăng nhập.' };
     };
@@ -442,7 +505,7 @@ var HT = (function () {
       var m = x.id ? find('subjects', x.id) : null;
       if (m) upd('subjects', m, o); else m = ins('subjects', o);
       return { ok: true, item: m };
-    }, ['ph', 'hs']);
+    }, ['ph']);
     A.deleteSubject = secured(function (p) { var m = find('subjects', p.id); if (m) del('subjects', m); return { ok: true }; }, ['ph']);
 
     A.saveConfig = secured(function (p) { if (p.appName) setCfg('appName', str(p.appName).slice(0, 40)); return { ok: true }; }, ['ph']);
@@ -466,7 +529,7 @@ var HT = (function () {
     function seed() {
       if (all('users').length) return false;
       var n = env.now();
-      ins('users', { username: 'admin', name: 'Phụ huynh', role: 'ph', pass: hash('123456'), studentId: '', courseIds: '', phone: '', active: '1', mustChange: '1', createdAt: n.iso });
+      ins('users', { username: 'admin', name: 'Phụ huynh', role: 'ph', pass: mkPass('123456'), studentId: '', courseIds: '', phone: '', active: '1', mustChange: '1', createdAt: n.iso });
       var st = ins('students', { name: 'Con', grade: '', note: 'Sửa tên trong Quản lý → Học sinh', color: '#2563eb', active: '1' });
       var base = { teacherPhone: '', place: '', monthlyFee: 0, roundMin: 15, minMin: 0, defaultMin: 90, studentIds: st.id, chargeExcused: '0', chargeUnexcused: '1',
         lat: '', lng: '', radius: 150, requireGps: '0', active: '1', note: '' };

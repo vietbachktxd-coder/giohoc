@@ -25,7 +25,7 @@ const addMonth = (m, k) => { const d = new Date(+m.slice(0, 4), +m.slice(5) - 1 
 const dur = m => { m = Math.round(+m || 0); return m >= 60 ? Math.floor(m / 60) + 'g' + (m % 60 ? p2(m % 60) : '') : m + "'"; };
 const hours = m => (Math.round((+m || 0) / 6) / 10).toString().replace('.', ',') + ' giờ';
 const isT = HT.isT;
-if (!['home', 'log', 'fee', 'stat', 'more'].includes(S.tab)) S.tab = 'home';
+if (!['setup', 'home', 'log', 'fee', 'stat', 'school', 'more'].includes(S.tab)) S.tab = 'home';
 S.month = LS.get('month', thisMonth());
 if (S.month > thisMonth()) S.month = thisMonth();
 
@@ -153,12 +153,13 @@ async function reload(quiet) {
   const r = await api('load', { from: a + '-01', to: b + '-31', since: LS.get('seen', '') });
   if (!r.ok) { if (!quiet) toast(r.error, 'er'); return false; }
   S.data = r; S.me = r.me; LS.set('me', r.me);
+  S.data.allStudents = r.students; S.data.students = r.students.filter(x => isT(x.active));
   S.data.courses.forEach((c, i) => { if (!c.color) c.color = COLORS[i % COLORS.length]; });
   syncNative();
   return true;
 }
 const C = id => (S.data.courses.find(c => c.id === id) || { name: '(lớp đã xóa)', color: '#94a3b8', schedule: [] });
-const SN = id => (S.data.students.find(s => s.id === id) || { name: '?' }).name;
+const SN = id => ((S.data.allStudents || S.data.students).find(s => s.id === id) || { name: '?' }).name;
 const activeCourses = () => S.data.courses.filter(c => isT(c.active));
 const pairs = () => { const o = []; activeCourses().forEach(c => HT.list(c.studentIds).forEach(sid => { if (S.data.students.some(s => s.id === sid) && (S.me.role !== 'hs' || S.me.studentId === sid)) o.push({ c, sid }); })); return o; };
 const openSessions = () => S.data.sessions.filter(s => s.start && !s.end && (s.status === 'co_mat' || s.status === 'hoc_bu'));
@@ -174,29 +175,31 @@ function syncNative() {
 }
 
 /* ---------------- Khung ứng dụng ---------------- */
-const TABS = [['home', '📅', 'Lịch học'], ['log', '📒', 'Nhật ký'], ['fee', '💰', 'Học phí'], ['more', '🛠', 'Quản lý']];
+const TABS = [['setup', '⚙', 'Thiết lập'], ['home', '✅', 'Điểm danh'], ['log', '📒', 'Nhật ký'], ['fee', '💰', 'Học phí'], ['more', '🛠', 'Quản lý']];
+const myTabs = () => TABS.filter(t => t[0] !== 'setup' || (S.me && S.me.role === 'ph'));
 async function start() {
   $('#app').innerHTML = `<header><h1 id="ttl">Giờ học</h1><button class="ib" id="bell">🔔</button><button class="ib" id="rf">⟳</button></header><main id="v"><div class="empty">Đang tải dữ liệu…</div></main>
-    <nav>${TABS.map(t => `<button data-t="${t[0]}"><i>${t[1]}</i>${t[2]}</button>`).join('')}</nav>`;
+    <nav>${myTabs().map(t => `<button data-t="${t[0]}"><i>${t[1]}</i>${t[2]}</button>`).join('')}</nav>`;
   document.querySelectorAll('nav button').forEach(b => b.onclick = () => go(b.dataset.t));
   $('#rf').onclick = async () => { $('#rf').textContent = '⏳'; await reload(); S.bill = S.sum = null; render(); $('#rf').textContent = '⟳'; };
   $('#bell').onclick = showNotifs;
-  if (await reload()) render(); else $('#v').innerHTML = `<div class="empty">Không tải được dữ liệu.<br><br><button class="btn p" onclick="start()">Thử lại</button></div>`;
+  if (await reload()) { render(); setTimeout(iosGuide, 800); } else $('#v').innerHTML = `<div class="empty">Không tải được dữ liệu.<br><br><button class="btn p" onclick="start()">Thử lại</button></div>`;
 }
 function go(t) { S.tab = t; LS.set('tab', t); render(); scrollTo(0, 0); }
 function render() {
   if (!S.data) return;
   stopTimer();
-  document.querySelectorAll('nav button').forEach(b => b.classList.toggle('on', b.dataset.t === (S.tab === 'stat' ? 'fee' : S.tab)));
+  document.querySelectorAll('nav button').forEach(b => b.classList.toggle('on', b.dataset.t === (['stat', 'school'].includes(S.tab) ? 'fee' : S.tab)));
   $('#ttl').textContent = (S.data.appName || 'Giờ học') + (S.demo ? ' · Dùng thử' : '');
   const u = S.data.unread || 0; $('#bell').innerHTML = '🔔' + (u ? `<b>${u > 9 ? '9+' : u}</b>` : '');
-  ({ home: vTkb, tkb: vTkb, log: vLog, stat: vStat, fee: vFee, more: vMore }[S.tab] || vTkb)();
+  if (S.tab === 'setup' && S.me.role !== 'ph') S.tab = 'home';
+  ({ setup: vSetup, home: vTkb, log: vLog, stat: vStat, fee: vFee, school: vSchool, more: vMore }[S.tab] || vTkb)();
   remindTick();
 }
-function feeToggle() { return `<div class="tabs"><button data-ft="fee" class="${S.tab === 'fee' ? 'on' : ''}">💰 Học phí</button><button data-ft="stat" class="${S.tab === 'stat' ? 'on' : ''}">📊 Thống kê</button></div>`; }
+function feeToggle() { return `<div class="tabs">${[['fee', '📚 Học thêm'], ['school', '🏫 Chính khóa'], ['stat', '📊 Thống kê']].map(x => `<button data-ft="${x[0]}" class="${S.tab === x[0] ? 'on' : ''}">${x[1]}</button>`).join('')}</div>`; }
 function bindFeeToggle() { document.querySelectorAll('[data-ft]').forEach(b => b.onclick = () => { S.tab = b.dataset.ft; LS.set('tab', S.tab); render(); }); }
 function monthNav(cb) {
-  return (S.tab === 'fee' || S.tab === 'stat' ? feeToggle() : '') + `<div class="mnav"><button class="btn o" data-m="-1">‹</button><b>${mLabel(S.month)}</b><button class="btn o" data-m="1" ${S.month >= thisMonth() ? 'disabled' : ''}>›</button></div>`;
+  return (['fee', 'stat', 'school'].includes(S.tab) ? feeToggle() : '') + `<div class="mnav"><button class="btn o" data-m="-1">‹</button><b>${mLabel(S.month)}</b><button class="btn o" data-m="1" ${S.month >= thisMonth() ? 'disabled' : ''}>›</button></div>`;
 }
 function bindMonth(cb) {
   bindFeeToggle();
@@ -379,7 +382,7 @@ function vTkb() {
   const V = S.tk, st = myStudents(), gv = S.me.role === 'gv';
   if (!V.s || !st.some(x => x.id === V.s)) V.s = st[0] ? st[0].id : '';
   const views = gv ? [['today', '✅ Điểm danh'], ['week', '🗓 Lịch dạy']] : [['today', '✅ Điểm danh'], ['week', '🗓 Thời khóa biểu'], ['menu', '🍱 Thực đơn'], ['find', '🔎 Tra cứu']];
-  const hdr = `<div class="tabs">${views.map(v => `<button data-v="${v[0]}" class="${V.view === v[0] ? 'on' : ''}">${v[1]}</button>`).join('')}<button id="rmd">⏰ Nhắc lịch</button></div>`;
+  const hdr = `<div class="tabs">${views.map(v => `<button data-v="${v[0]}" class="${V.view === v[0] ? 'on' : ''}">${v[1]}</button>`).join('')}</div>`;
   if (V.view === 'today') return vHome(hdr);
   let html = hdr;
   if (V.view !== 'find') {
@@ -388,26 +391,21 @@ function vTkb() {
   }
   if (V.view === 'week') {
     const items = gv ? pairs().flatMap(x => (x.c.schedule || []).filter(z => +z.d === V.d).map(z => ({ kind: 'ht', start: z.t, end: HT.hhmm(HT.min(z.t) + (+z.m || 90)), title: x.c.name, who: SN(x.sid), where: x.c.place, lat: x.c.lat, lng: x.c.lng, color: x.c.color }))).sort((a, b) => a.start < b.start ? -1 : 1) : dayItems(V.s, V.d);
-    html += `<div class="card"><h3>${WD[V.d]}${gv ? '' : ' · ' + h(Stu(V.s).name || '')}</h3>${items.length ? items.map(x => `<div class="item" ${x.t ? `data-tt="${x.t.id}" style="cursor:pointer"` : ''}><div class="bar" style="background:${x.color}"></div>
+    html += `<div class="card"><h3>${WD[V.d]}${gv ? '' : ' · ' + h(Stu(V.s).name || '')}</h3>${items.length ? items.map(x => `<div class="item"><div class="bar" style="background:${x.color}"></div>
       <div style="width:84px" class="sm"><b>${x.start}</b><br><span class="mu">${x.end}</span></div><div class="f"><div class="row"><b class="f">${h(x.title)}</b><span class="chip" style="background:${x.kind === 'ck' ? '#e2e8f0' : '#ccfbf1'}">${x.kind === 'ck' ? 'Chính khóa' : 'Học thêm'}</span></div>
       <div class="mu">${[x.who, x.where].filter(Boolean).map(h).join(' · ')} ${mapLink(x.lat, x.lng)}</div></div></div>`).join('') : '<div class="empty">Không có lịch học</div>'}</div>`;
-    if (!gv && V.s) html += `<div class="row wrap gap"><button class="btn p s f" id="addTT">＋ Tiết học</button>${S.me.role === 'ph' ? '<button class="btn o s f" id="tSub">📘 Môn học</button><button class="btn o s f" id="tCou">📚 Lớp học thêm</button>' : ''}</div>`;
+    if (S.me.role === 'ph' && !items.length) html += `<p class="mu sm c">Khai báo thời khóa biểu ở tab ⚙ Thiết lập.</p>`;
   } else if (V.view === 'menu') {
     const ms = (S.data.menus || []).filter(m => +m.d === V.d && (!m.studentId || st.some(x => x.id === m.studentId)));
     html += `<div class="card"><h3>🍱 Thực đơn ${WD[V.d]}</h3>${Object.keys(HT.MEAL).map(k => { const l = ms.filter(m => m.meal === k);
-      return `<div class="item"><div style="width:84px" class="b sm">${HT.MEAL[k]}</div><div class="f">${l.length ? l.map(m => `<div ${S.me.role === 'ph' ? `data-mn="${m.id}" style="cursor:pointer"` : ''}>${h(m.dishes)}${m.studentId && st.length > 1 ? ` <span class="chip">${h(SN(m.studentId))}</span>` : ''}${m.note ? `<div class="mu">${h(m.note)}</div>` : ''}</div>`).join('') : '<span class="mu">—</span>'}</div></div>`; }).join('')}</div>
-      ${S.me.role === 'ph' ? '<button class="btn p w" id="addMn">＋ Thêm món</button>' : ''}`;
+      return `<div class="item"><div style="width:84px" class="b sm">${HT.MEAL[k]}</div><div class="f">${l.length ? l.map(m => `<div>${h(m.dishes)}${m.studentId && st.length > 1 ? ` <span class="chip">${h(SN(m.studentId))}</span>` : ''}${m.note ? `<div class="mu">${h(m.note)}</div>` : ''}</div>`).join('') : '<span class="mu">—</span>'}</div></div>`; }).join('')}</div>
+`;
   } else {
     html += whereCard() + `<div class="card"><input id="q" placeholder="🔎 Tìm theo môn, thầy cô, lớp, nơi học…" value="${h(V.q)}"><div id="res"></div></div>`;
   }
   $('#v').innerHTML = html; bindViews();
-  const ts = $('#tSub'); if (ts) ts.onclick = subjectList; const tc = $('#tCou'); if (tc) tc.onclick = courseList;
   document.querySelectorAll('[data-d]').forEach(b => b.onclick = () => { V.d = +b.dataset.d; vTkb(); });
   document.querySelectorAll('[data-st]').forEach(b => b.onclick = () => { V.s = b.dataset.st; vTkb(); });
-  document.querySelectorAll('[data-tt]').forEach(b => b.onclick = () => ttForm(S.data.timetable.find(t => t.id === b.dataset.tt)));
-  document.querySelectorAll('[data-mn]').forEach(b => b.onclick = () => menuForm(S.data.menus.find(m => m.id === b.dataset.mn)));
-  const a = $('#addTT'); if (a) a.onclick = () => ttForm({ studentId: V.s, d: V.d, start: '07:00', end: '07:45' });
-  const m = $('#addMn'); if (m) m.onclick = () => menuForm({ d: V.d, meal: 'trua', studentId: '' });
   const q = $('#q');
   if (q) {
     const run = () => {
@@ -424,13 +422,13 @@ function bindViews() {
   const r = $('#rmd'); if (r) r.onclick = remindForm;
 }
 /* ---- Nhắc lịch học: lưu theo tài khoản trên máy chủ ---- */
-const RM_OPT = [10, 15, 30, 45, 60, 90, 120, 180];
-function rmPrefs() { const p = (S.me && S.me.prefs) || {}; return { on: p.on !== false, before: p.before || [60, 30], ck: !!p.ck }; }
+const RM_OPT = [10, 30];
+function rmPrefs() { const p = (S.me && S.me.prefs) || {}; return { on: p.on !== false, before: p.before || [30, 10], ck: !!p.ck }; }
 function remindForm() {
   const p = rmPrefs();
   modal(`${head('⏰ Nhắc lịch học')}<label class="chk"><input type="checkbox" id="on" ${p.on ? 'checked' : ''}>Bật nhắc lịch trên điện thoại</label>
-    <label>Báo trước giờ học (chọn được nhiều mốc)</label><div class="row wrap gap">${RM_OPT.map(m => `<label class="chk" style="width:30%"><input type="checkbox" class="bf" value="${m}" ${p.before.includes(m) ? 'checked' : ''}>${m >= 60 ? Math.floor(m / 60) + ' giờ' + (m % 60 ? ' ' + m % 60 + "'" : '') : m + ' phút'}</label>`).join('')}</div>
-    <label>Hoặc nhập số phút khác</label><input id="cus" inputmode="numeric" placeholder="VD: 240" value="${p.before.filter(m => !RM_OPT.includes(m)).join(',')}">
+    <label>Báo trước giờ học (chọn được nhiều mốc)</label><div class="row wrap gap">${RM_OPT.map(m => `<label class="chk" style="width:45%"><input type="checkbox" class="bf" value="${m}" ${p.before.includes(m) ? 'checked' : ''}>${m >= 60 ? Math.floor(m / 60) + ' giờ' + (m % 60 ? ' ' + m % 60 + "'" : '') : m + ' phút'}</label>`).join('')}</div>
+    <label>Hoặc tự chọn số phút (VD: 45, 60)</label><input id="cus" inputmode="numeric" placeholder="VD: 60" value="${p.before.filter(m => !RM_OPT.includes(m)).join(',')}">
     <label class="chk"><input type="checkbox" id="ck" ${p.ck ? 'checked' : ''}>Nhắc cả lịch học chính khóa</label>
     <p class="mu sm">Lịch học thêm luôn được nhắc; khi hết giờ mà chưa bấm Kết thúc app sẽ nhắc. Cài đặt lưu theo tài khoản, dùng chung trên mọi máy.${IOS ? ' iPhone: thông báo hiện khi app đang mở.' : ''}</p>
     <button class="btn p w" id="sv">Lưu</button>`, el => {
@@ -479,9 +477,9 @@ function ttForm(t) {
       const days = val(el, 'rep') ? [1, 2, 3, 4, 5] : [x.d];
       busy(e.target, true);
       for (const d of days) { const r = await api('saveTT', { item: Object.assign({}, x, { d }) }); if (!r.ok) { busy(e.target, false); return toast(r.error, 'er'); } }
-      busy(e.target, false); closeModal(); toast('Đã lưu', 'ok'); await reload(); vTkb();
+      busy(e.target, false); toast('Đã lưu', 'ok'); await reload(); ttManager(x.studentId, x.d);
     };
-    const d = el.querySelector('#del'); if (d) d.onclick = async () => { await api('deleteTT', { id: t.id }); closeModal(); await reload(); vTkb(); };
+    const d = el.querySelector('#del'); if (d) d.onclick = async () => { await api('deleteTT', { id: t.id }); await reload(); ttManager(t.studentId, +t.d); };
   });
 }
 function menuForm(m) {
@@ -493,8 +491,8 @@ function menuForm(m) {
     ${st.length > 1 ? `<label>Cho học sinh</label><select id="sid"><option value="">Tất cả</option>${st.map(s => `<option value="${s.id}" ${s.id === m.studentId ? 'selected' : ''}>${h(s.name)}</option>`).join('')}</select>` : ''}
     <label>Ghi chú (dinh dưỡng, dị ứng…)</label><input id="note" value="${h(m.note || '')}">
     <div style="height:12px"></div><div class="row">${m.id ? '<button class="btn er" id="del">Xóa</button>' : ''}<button class="btn p f" id="sv">Lưu</button></div>`, el => {
-    el.querySelector('#sv').onclick = async () => { const r = await api('saveMenu', { item: { id: m.id, d: +val(el, 'd'), meal: val(el, 'meal'), dishes: val(el, 'dishes'), studentId: val(el, 'sid'), note: val(el, 'note') } }); if (!r.ok) return toast(r.error, 'er'); closeModal(); await reload(); vTkb(); };
-    const d = el.querySelector('#del'); if (d) d.onclick = async () => { await api('deleteMenu', { id: m.id }); closeModal(); await reload(); vTkb(); };
+    el.querySelector('#sv').onclick = async () => { const r = await api('saveMenu', { item: { id: m.id, d: +val(el, 'd'), meal: val(el, 'meal'), dishes: val(el, 'dishes'), studentId: val(el, 'sid'), note: val(el, 'note') } }); if (!r.ok) return toast(r.error, 'er'); await reload(); menuManager(+val(el, 'd')); };
+    const d = el.querySelector('#del'); if (d) d.onclick = async () => { await api('deleteMenu', { id: m.id }); await reload(); menuManager(+m.d); };
   });
 }
 
@@ -631,9 +629,7 @@ async function vFee() {
   const B = S.bill.bills.filter(b => (!S.filter.s || b.studentId === S.filter.s));
   const T = k => B.reduce((t, b) => t + b[k], 0);
   let html = monthNav() + (multiStudent() ? `<div class="tabs"><button data-fs="" class="${!S.filter.s ? 'on' : ''}">Tất cả</button>${S.data.students.map(s => `<button data-fs="${s.id}" class="${S.filter.s === s.id ? 'on' : ''}">${h(s.name)}</button>`).join('')}</div>` : '');
-  html += `<div class="card"><div class="row"><div class="f"><div class="mu">Tổng học phí ${mLabel(S.month).toLowerCase()}</div><div class="big-money">${money(T('total'))}</div></div>
-    <div class="r sm">Đã trả <b class="paid">${money(T('paid'))}</b><br>Còn lại <b class="${T('due') > 0 ? 'due' : 'paid'}">${money(T('due'))}</b></div></div>
-    <div class="row" style="margin-top:10px"><button class="btn o s f" id="csv">⬇ Xuất Excel (CSV)</button><button class="btn o s f" id="shAll">📤 Gửi tổng hợp</button></div></div>`;
+  html += feeSummary() + `<div class="row" style="margin-bottom:12px"><button class="btn o s f" id="csv">⬇ Xuất Excel (CSV)</button><button class="btn o s f" id="shAll">📤 Gửi tổng hợp</button></div>`;
   B.forEach((b, i) => {
     const c = C(b.courseId);
     html += `<div class="card"><h3><span class="bar" style="background:${c.color};height:20px"></span><span class="f">${h(c.name)}${multiStudent() ? ' · ' + h(SN(b.studentId)) : ''}</span></h3>
@@ -691,7 +687,7 @@ function viewBill(b) {
   });
 }
 function payForm(b, type) {
-  const c = C(b.courseId);
+  const c = b.feeId ? { name: b.name } : C(b.courseId);
   modal(`${head(type === 'dc' ? 'Điều chỉnh học phí' : 'Ghi nhận thanh toán')}<div class="mu">${h(c.name)} · ${h(SN(b.studentId))} · ${mLabel(S.month)}</div>
     <label>${type === 'dc' ? 'Số tiền (+ thu thêm, − giảm trừ)' : 'Số tiền (đ)'}</label><input id="am" inputmode="numeric" value="${type === 'tt' && b.due > 0 ? b.due : ''}">
     ${type === 'tt' ? `<div class="g2"><div><label>Ngày trả</label><input id="dt" type="date" value="${today()}"></div><div><label>Hình thức</label><select id="me"><option>Chuyển khoản</option><option>Tiền mặt</option></select></div></div>` : ''}
@@ -699,9 +695,9 @@ function payForm(b, type) {
     el.querySelector('#sv').onclick = async e => {
       const am = Number(val(el, 'am').replace(/[^\d-]/g, ''));
       busy(e.target, true);
-      const r = await api('savePayment', { payment: { courseId: b.courseId, studentId: b.studentId, month: S.month, type, amount: am, date: val(el, 'dt'), method: val(el, 'me'), note: val(el, 'nt') } });
+      const r = await api('savePayment', { payment: { courseId: b.courseId, feeId: b.feeId, studentId: b.studentId, month: S.month, type, amount: am, date: val(el, 'dt'), method: val(el, 'me'), note: val(el, 'nt') } });
       busy(e.target, false); if (!r.ok) return toast(r.error, 'er');
-      closeModal(); toast('Đã lưu', 'ok'); S.bill = S.sum = null; vFee();
+      closeModal(); toast('Đã lưu', 'ok'); S.bill = S.sum = null; b.feeId ? vSchool() : vFee();
     };
   });
 }
@@ -718,43 +714,139 @@ function exportCsv(B) {
   download('HocPhi_' + S.month + '.csv', '﻿' + L.map(r => r.map(q).join(',')).join('\r\n'), 'text/csv');
 }
 
-/* ---------------- TAB 5: KHÁC / QUẢN LÝ ---------------- */
+/* ---------------- TAB THIẾT LẬP (phụ huynh): dữ liệu đầu vào ---------------- */
+function vSetup() {
+  const D = S.data, n = x => (x || []).length;
+  const steps = [[D.students.some(x => x.name !== 'Con'), 'Học sinh'], [n(D.subjects) > 0, 'Môn học'], [n(D.timetable) > 0, 'Thời khóa biểu'],
+    [D.courses.some(c => +c.rate || +c.monthlyFee), 'Lớp học thêm & đơn giá'], [n(D.schoolfees) > 0, 'Học phí chính khóa'], [D.users.length > 1, 'Tài khoản']];
+  const done = steps.filter(x => x[0]).length;
+  const row = (id, ic, t, sub, cnt) => `<div id="${id}"><span style="font-size:22px">${ic}</span><div class="f"><b>${t}</b><div class="mu">${sub}</div></div><span class="chip">${cnt}</span>›</div>`;
+  $('#v').innerHTML = (done < steps.length ? `<div class="card"><h3>🚀 Thiết lập ban đầu · ${done}/${steps.length}</h3><div style="background:#e2e8f0;border-radius:8px;height:8px"><div style="width:${done / steps.length * 100}%;height:100%;background:var(--p);border-radius:8px"></div></div>
+      <div class="sm" style="margin-top:8px">${steps.map(x => (x[0] ? '✅ ' : '⬜ ') + x[1]).join(' · ')}</div></div>` : '') +
+    `<div class="card"><h3>Học sinh & lịch học</h3><div class="list-a">
+      ${row('sStud', '🧒', 'Học sinh', 'Thêm / sửa / xóa · trường, vị trí trường', D.students.filter(x => isT(x.active)).length)}
+      ${row('sSub', '📘', 'Môn học', 'Danh mục môn, giáo viên, phòng học', n(D.subjects))}
+      ${row('sTT', '🗓', 'Thời khóa biểu chính khóa', 'Các tiết học ở trường theo thứ', n(D.timetable))}
+      ${row('sMenu', '🍱', 'Thực đơn', 'Bữa sáng, trưa, xế, tối theo thứ', n(D.menus))}</div></div>
+    <div class="card"><h3>Học thêm & học phí</h3><div class="list-a">
+      ${row('sCourse', '📚', 'Lớp học thêm & đơn giá', 'Giáo viên, lịch học, cách tính tiền, vị trí', D.courses.filter(c => isT(c.active)).length)}
+      ${row('sFee', '🏫', 'Học phí chính khóa', 'Học phí trường, bán trú, BHYT, tiền ăn…', n((D.schoolfees || []).filter(f => isT(f.active))))}</div></div>
+    <p class="mu sm c">Tài khoản người dùng, nhắc lịch, sao lưu: tab 🛠 Quản lý.</p>`;
+  const on = (id, f) => { const e = $('#' + id); if (e) e.onclick = f; };
+  on('sStud', studentList); on('sSub', subjectList); on('sTT', () => ttManager()); on('sMenu', () => menuManager()); on('sCourse', courseList); on('sFee', feeList);
+}
+function dayChips(sel, attr) { return `<div class="tabs">${[1, 2, 3, 4, 5, 6, 7].map(d => `<button ${attr}="${d}" class="${sel === d ? 'on' : ''}">${WDS[d]}</button>`).join('')}</div>`; }
+function ttManager(sid, d) {
+  const st = S.data.students.filter(s => isT(s.active)); sid = sid || (st[0] || {}).id; d = d || 1;
+  const L = (S.data.timetable || []).filter(t => t.studentId === sid && +t.d === d).sort((a, b) => a.start < b.start ? -1 : 1);
+  modal(`${head('🗓 Thời khóa biểu chính khóa')}${st.length > 1 ? `<div class="tabs">${st.map(s => `<button data-ss="${s.id}" class="${s.id === sid ? 'on' : ''}">${h(s.name)}</button>`).join('')}</div>` : ''}${dayChips(d, 'data-dd')}
+    <div class="list-a">${L.map(t => `<div data-t="${t.id}"><b style="width:96px">${t.start}–${t.end}</b><div class="f"><b>${h(t.subject)}</b><div class="mu">${h([t.teacher, t.room].filter(Boolean).join(' · '))}</div></div>›</div>`).join('') || `<div class="empty">${WD[d]} chưa có tiết học</div>`}</div>
+    <div style="height:10px"></div><button class="btn p w" id="nw">＋ Thêm tiết học</button>`, el => {
+    el.querySelectorAll('[data-ss]').forEach(b => b.onclick = () => ttManager(b.dataset.ss, d));
+    el.querySelectorAll('[data-dd]').forEach(b => b.onclick = () => ttManager(sid, +b.dataset.dd));
+    el.querySelectorAll('[data-t]').forEach(b => b.onclick = () => ttForm(L.find(t => t.id === b.dataset.t)));
+    el.querySelector('#nw').onclick = () => { const last = L[L.length - 1]; const a = last ? HT.min(last.end) + 5 : 420; ttForm({ studentId: sid, d, start: HT.hhmm(a), end: HT.hhmm(a + 45) }); };
+  });
+}
+function menuManager(d) {
+  d = d || 1;
+  const L = (S.data.menus || []).filter(m => +m.d === d);
+  modal(`${head('🍱 Thực đơn')}${dayChips(d, 'data-dd')}<div class="list-a">${Object.keys(HT.MEAL).map(k => L.filter(m => m.meal === k).map(m => `<div data-m="${m.id}"><b style="width:84px">${HT.MEAL[k]}</b><span class="f">${h(m.dishes)}</span>›</div>`).join('')).join('') || `<div class="empty">${WD[d]} chưa có thực đơn</div>`}</div>
+    <div style="height:10px"></div><button class="btn p w" id="nw">＋ Thêm món</button>`, el => {
+    el.querySelectorAll('[data-dd]').forEach(b => b.onclick = () => menuManager(+b.dataset.dd));
+    el.querySelectorAll('[data-m]').forEach(b => b.onclick = () => menuForm(L.find(m => m.id === b.dataset.m)));
+    el.querySelector('#nw').onclick = () => menuForm({ d, meal: 'trua', studentId: '' });
+  });
+}
+const CYCLE = { thang: 'Hằng tháng', ky: 'Mỗi học kỳ (6 tháng)', nam: 'Mỗi năm', lan: 'Một lần' };
+function feeList() {
+  const L = (S.data.schoolfees || []).filter(f => isT(f.active));
+  modal(`${head('🏫 Học phí chính khóa')}<p class="mu sm">Các khoản thu của trường: học phí, bán trú, tiền ăn, BHYT, đồng phục…</p>
+    <div class="list-a">${L.map(f => `<div data-f="${f.id}"><div class="f"><b>${h(f.name)}</b>${multiStudent() ? ' · ' + h(SN(f.studentId)) : ''}<div class="mu">${CYCLE[f.cycle]} · từ ${f.from.slice(5)}/${f.from.slice(0, 4)}${f.to ? ' đến ' + f.to.slice(5) + '/' + f.to.slice(0, 4) : ''}</div></div><b>${money(f.amount)}</b>›</div>`).join('') || '<div class="empty">Chưa có khoản thu</div>'}</div>
+    <div style="height:10px"></div><button class="btn p w" id="nw">＋ Thêm khoản thu</button>`, el => {
+    el.querySelectorAll('[data-f]').forEach(b => b.onclick = () => feeForm(L.find(f => f.id === b.dataset.f)));
+    el.querySelector('#nw').onclick = () => feeForm({});
+  });
+}
+function feeForm(f) {
+  const st = S.data.students.filter(s => isT(s.active));
+  modal(`${head(f.id ? 'Sửa khoản thu' : 'Thêm khoản thu')}
+    ${st.length > 1 ? `<label>Học sinh</label><select id="sid">${st.map(s => `<option value="${s.id}" ${s.id === f.studentId ? 'selected' : ''}>${h(s.name)}</option>`).join('')}</select>` : `<input type="hidden" id="sid" value="${(st[0] || {}).id}">`}
+    <label>Tên khoản thu</label><input id="name" list="feeL" value="${h(f.name || '')}"><datalist id="feeL">${['Học phí', 'Tiền bán trú', 'Tiền ăn', 'BHYT', 'Đồng phục', 'Sách giáo khoa', 'Quỹ phụ huynh', 'Học phí tiếng Anh tăng cường'].map(x => `<option value="${x}">`).join('')}</datalist>
+    <div class="g2"><div><label>Số tiền (đ)</label><input id="amount" inputmode="numeric" value="${f.amount || ''}"></div><div><label>Chu kỳ thu</label><select id="cycle">${Object.keys(CYCLE).map(k => `<option value="${k}" ${f.cycle === k ? 'selected' : ''}>${CYCLE[k]}</option>`).join('')}</select></div></div>
+    <div class="g2"><div><label>Từ tháng</label><input id="from" type="month" value="${f.from || S.month}"></div><div><label>Đến tháng (để trống = không hạn)</label><input id="to" type="month" value="${f.to || ''}"></div></div>
+    <label>Ghi chú</label><input id="note" value="${h(f.note || '')}">
+    <div style="height:12px"></div><div class="row">${f.id ? '<button class="btn er" id="del">Xóa</button>' : ''}<button class="btn p f" id="sv">Lưu</button></div>`, el => {
+    el.querySelector('#sv').onclick = async e => {
+      busy(e.target, true);
+      const r = await api('saveFee', { item: { id: f.id, studentId: val(el, 'sid'), name: val(el, 'name'), amount: val(el, 'amount').replace(/\D/g, ''), cycle: val(el, 'cycle'), from: val(el, 'from'), to: val(el, 'to'), note: val(el, 'note') } });
+      busy(e.target, false); if (!r.ok) return toast(r.error, 'er'); S.bill = null; await reload(); feeList(); toast('Đã lưu', 'ok');
+    };
+    const d = el.querySelector('#del'); if (d) d.onclick = async () => { if (!(await confirmBox(`Xóa khoản <b>${h(f.name)}</b>?`, 'Xóa'))) return feeForm(f); const r = await api('deleteFee', { id: f.id }); if (!r.ok) return toast(r.error, 'er'); S.bill = null; await reload(); feeList(); toast(r.archived ? 'Đã ngừng thu (giữ lịch sử thanh toán)' : 'Đã xóa', 'ok'); };
+  });
+}
+
+/* ---------------- HỌC PHÍ CHÍNH KHÓA ---------------- */
+function feeSummary() {
+  const B = S.bill.bills, K = S.bill.school || [], t = (a, k) => a.reduce((x, b) => x + b[k], 0);
+  const tot = t(B, 'total') + t(K, 'total'), due = t(B, 'due') + t(K, 'due');
+  return `<div class="card"><div class="mu">Tổng phải trả ${mLabel(S.month).toLowerCase()}</div><div class="row"><div class="big-money f">${money(tot)}</div><div class="r sm">Còn lại<br><b class="${due > 0 ? 'due' : 'paid'}">${money(due)}</b></div></div>
+    <div class="row sm" style="margin-top:6px"><span class="f">📚 Học thêm: <b>${money(t(B, 'total'))}</b></span><span>🏫 Chính khóa: <b>${money(t(K, 'total'))}</b></span></div></div>`;
+}
+async function vSchool() {
+  $('#v').innerHTML = monthNav() + '<div class="empty">Đang tính…</div>'; bindMonth(vSchool);
+  if (!S.bill || S.bill.month !== S.month) { const r = await api('bill', { month: S.month }); if (!r.ok) return toast(r.error, 'er'); S.bill = r; }
+  if (S.tab !== 'school') return;
+  const K = S.bill.school || [];
+  let html = monthNav() + feeSummary();
+  html += K.map((b, i) => `<div class="card"><div class="row"><div class="f"><b>${h(b.name)}</b>${multiStudent() ? ' · ' + h(SN(b.studentId)) : ''}<div class="mu">${CYCLE[b.cycle] || ''}${b.note ? ' · ' + h(b.note) : ''}</div></div>
+      <div class="r"><b>${money(b.total)}</b><div class="sm ${b.due > 0 ? 'due' : 'paid'}">${b.due > 0 ? 'Còn ' + money(b.due) : '✔ Đã đủ'}</div></div></div>
+      ${b.pays.length ? `<div class="sm" style="margin-top:6px">${b.pays.map(p => `<div class="row"><span class="f">${p.type === 'dc' ? '± ' + h(p.note || 'Điều chỉnh') : '💵 ' + dmy(p.date) + (p.method ? ' · ' + h(p.method) : '')}</span><b>${money(p.amount)}</b>${S.me.role === 'ph' ? `<button class="btn s o" data-dp="${p.id}">✕</button>` : ''}</div>`).join('')}</div>` : ''}
+      ${S.me.role === 'ph' ? `<div class="row gap" style="margin-top:8px"><button class="btn ok s" data-pay="${i}">💵 Đã nộp</button><button class="btn o s" data-adj="${i}">± Điều chỉnh</button></div>` : ''}</div>`).join('')
+    || `<div class="card empty">Tháng này không có khoản thu chính khóa${S.me.role === 'ph' ? '.<br>Khai báo ở ⚙ Thiết lập → Học phí chính khóa.' : ''}</div>`;
+  $('#v').innerHTML = html; bindMonth(vSchool);
+  document.querySelectorAll('[data-pay]').forEach(x => x.onclick = () => payForm(K[+x.dataset.pay], 'tt'));
+  document.querySelectorAll('[data-adj]').forEach(x => x.onclick = () => payForm(K[+x.dataset.adj], 'dc'));
+  document.querySelectorAll('[data-dp]').forEach(x => x.onclick = async () => { if (!(await confirmBox('Xóa khoản này?', 'Xóa'))) return; await api('deletePayment', { id: x.dataset.dp }); S.bill = null; vSchool(); });
+}
+
+/* ---------------- TAB QUẢN LÝ ---------------- */
 function vMore() {
   const ph = S.me.role === 'ph';
-  let html = `<div class="card row"><div class="f"><b>${h(S.me.name)}</b><div class="mu">${ROLE[S.me.role]} · ${h(S.me.username)}</div></div></div>`;
-  if (ph) {
-    const steps = [[S.data.students.some(x => x.name !== 'Con'), '1. Học sinh (tên, trường)', 'mStud'], [(S.data.subjects || []).length > 0, '2. Danh mục môn học', 'mSub'],
-      [(S.data.timetable || []).length > 0, '3. Thời khóa biểu chính khóa', 'mTT'], [S.data.courses.some(c => +c.rate || +c.monthlyFee), '4. Lớp học thêm: đơn giá, lịch học', 'mCourse'],
-      [S.data.users.length > 1, '5. Tài khoản cho thầy cô, con', 'mUser']];
-    if (steps.some(x => !x[0])) html += `<div class="card"><h3>🚀 Thiết lập ban đầu</h3>${steps.map(x => `<div class="item" data-go="${x[2]}" style="cursor:pointer"><span>${x[0] ? '✅' : '⬜'}</span><span class="f">${x[1]}</span>›</div>`).join('')}</div>`;
-  }
   const pend = ph ? S.data.users.filter(u => !u.active && !u.mustChange).length : 0;
+  let html = `<div class="card row"><span style="font-size:30px">${S.me.role === 'ph' ? '👨‍👩‍👧' : S.me.role === 'gv' ? '👩‍🏫' : '🧒'}</span><div class="f"><b>${h(S.me.name)}</b><div class="mu">${ROLE[S.me.role]} · ${h(S.me.username)}</div></div></div>`;
   if (pend) html += `<div class="card warn" id="pend" style="cursor:pointer">🆕 <b>${pend}</b> tài khoản đăng ký mới đang chờ duyệt ›</div>`;
-  if (ph) html += `<div class="card"><h3>Quản lý</h3><div class="list-a">
-      <div id="mStud0" style="display:none"></div>
-      <div id="mSub">📘 <span class="f">Môn học (danh mục cho thời khóa biểu)</span><span class="mu">${(S.data.subjects || []).length} ›</span></div>
-      <div id="mTT">🗓 <span class="f">Thời khóa biểu chính khóa</span><span class="mu">${(S.data.timetable || []).length} tiết ›</span></div>
-      <div id="mCourse">📚 <span class="f">Lớp học thêm, lịch học, đơn giá</span><span class="mu">${S.data.courses.length} ›</span></div>
-      <div id="mStud">🧒 <span class="f">Học sinh</span><span class="mu">${S.data.students.length} ›</span></div>
-      <div id="mUser">👤 <span class="f">Tài khoản (giáo viên, học sinh)</span><span class="mu">${S.data.users.length} ›</span></div>
-      <div id="mBak">💾 <span class="f">Sao lưu dữ liệu (JSON)</span></div>
+  if (ph) html += `<div class="card"><h3>Người dùng & dữ liệu</h3><div class="list-a">
+      <div id="mUser">👤 <span class="f">Tài khoản người dùng</span><span class="mu">${S.data.users.length} ›</span></div>
+      <div id="mBak">💾 <span class="f">Sao lưu dữ liệu</span></div>
       <div id="mName">✏ <span class="f">Tên phần mềm</span><span class="mu">${h(S.data.appName)}</span></div></div></div>`;
-  html += `<div class="card"><h3>Cài đặt</h3><div class="list-a">
-      <div id="mRem">⏰ <span class="f">Nhắc lịch học</span><span class="mu">${rmPrefs().on ? rmPrefs().before.map(b => b + "'").join(', ') : 'Tắt'}</span></div>
+  html += `<div class="card"><h3>Cá nhân</h3><div class="list-a">
+      <div id="mRem">⏰ <span class="f">Nhắc lịch học</span><span class="mu">${rmPrefs().on ? 'trước ' + rmPrefs().before.join(', ') + ' phút' : 'Tắt'}</span></div>
       <div id="mPass">🔑 <span class="f">Đổi mật khẩu</span></div>
-      ${NATIVE ? '<div id="mUpd">⬆ <span class="f">Kiểm tra cập nhật</span><span class="mu">' + NATIVE.versionName + '</span></div>' : `<div id="mApk">📱 <span class="f">Cài app (Android / iPhone)</span></div>`}
+      ${NATIVE ? '<div id="mUpd">⬆ <span class="f">Kiểm tra cập nhật</span><span class="mu">' + NATIVE.versionName + '</span></div>' : `<div id="mApk">📱 <span class="f">Cài app lên điện thoại</span></div>`}
       ${S.demo ? '<div id="mReset">♻ <span class="f">Xóa dữ liệu dùng thử</span></div>' : ''}
       <div id="mOut" style="color:var(--er)">⎋ <span class="f">Đăng xuất</span></div></div></div>
-    <p class="mu c">Giờ học · giao diện ${APPV}${S.demo ? ' · chế độ dùng thử' : ''}</p>`;
+    <p class="mu c sm">🔒 Mật khẩu mã hóa riêng từng tài khoản · khóa 15 phút nếu nhập sai 5 lần · phiên đăng nhập hết hạn sau 180 ngày<br>Giờ học ${APPV}${S.demo ? ' · dùng thử' : ''}</p>`;
   $('#v').innerHTML = html;
   const on = (id, f) => { const e = $('#' + id); if (e) e.onclick = f; };
-  on('mCourse', courseList); on('mSub', subjectList); on('mTT', () => { S.tk = { view: 'week', d: 1, s: '', q: '' }; go('home'); }); on('pend', userList);
-  document.querySelectorAll('[data-go]').forEach(x => x.onclick = () => { const e = $('#' + x.dataset.go); if (e) e.click(); }); on('mStud', studentList); on('mUser', userList); on('mPass', () => changePass(false)); on('mOut', () => logout());
-  on('mUpd', () => Native.checkUpdate(true)); on('mApk', () => location.href = 'download/');
+  on('pend', userList); on('mUser', userList); on('mPass', () => changePass(false)); on('mOut', () => logout()); on('mRem', remindForm);
+  on('mUpd', () => Native.checkUpdate(true)); on('mApk', () => IOS ? iosGuide(true) : (location.href = 'download/'));
   on('mReset', async () => { if (await confirmBox('Xóa toàn bộ dữ liệu dùng thử?', 'Xóa')) { DEMO.reset(); logout(true); } });
   on('mBak', async () => { const r = await api('backup'); if (!r.ok) return toast(r.error, 'er'); download('GioHoc_saoluu_' + today() + '.json', JSON.stringify(r.data, null, 1), 'application/json'); });
   on('mName', () => modal(`${head('Tên phần mềm')}<input id="n" value="${h(S.data.appName)}"><div style="height:12px"></div><button class="btn p w" id="sv">Lưu</button>`, el => el.querySelector('#sv').onclick = async () => { const r = await api('saveConfig', { appName: val(el, 'n') }); if (!r.ok) return toast(r.error, 'er'); closeModal(); await reload(); render(); }));
-  on('mRem', remindForm);
+}
+
+/* ---------------- Cài lên iPhone: hướng dẫn 3 bước ---------------- */
+function iosGuide(force) {
+  if (!IOS || navigator.standalone || (!force && LS.get('iosGuide', '') === today())) return;
+  LS.set('iosGuide', today());
+  modal(`${head('📱 Cài Giờ học lên iPhone')}
+    <div class="item"><b style="font-size:26px;width:36px">1</b><div class="f">Bấm nút <b>Chia sẻ</b> <span style="font-size:22px">⬆</span> ở thanh dưới cùng của Safari</div></div>
+    <div class="item"><b style="font-size:26px;width:36px">2</b><div class="f">Kéo xuống, chọn <b>Thêm vào MH chính</b> <span style="font-size:20px">➕</span></div></div>
+    <div class="item"><b style="font-size:26px;width:36px">3</b><div class="f">Bấm <b>Thêm</b>. Biểu tượng <b>Giờ học</b> xuất hiện trên màn hình — mở như app, tự cập nhật.</div></div>
+    <p class="mu sm">Phải mở bằng <b>Safari</b>. Nếu đang ở Zalo/Facebook: bấm ⋯ → Mở bằng Safari.</p>
+    <div style="text-align:center;font-size:34px;animation:up 1s infinite alternate">⬇</div>
+    <button class="btn p w" data-x>Đã hiểu</button>`);
 }
 
 function courseList() {
@@ -836,7 +928,7 @@ function subjectList() {
   });
 }
 function studentList() {
-  modal(`${head('Học sinh')}<div class="list-a">${S.data.students.map(s => `<div data-s="${s.id}">🧒 <div class="f"><b>${h(s.name)}</b><div class="mu">${h(s.grade || '')} ${h(s.note || '')}</div></div>›</div>`).join('')}</div>
+  modal(`${head('Học sinh')}<div class="list-a">${S.data.students.filter(s => isT(s.active)).map(s => `<div data-s="${s.id}">🧒 <div class="f"><b>${h(s.name)}</b><div class="mu">${h(s.grade || '')} ${h(s.note || '')}</div></div>›</div>`).join('')}</div>
     <div style="height:10px"></div><button class="btn p w" id="nw">＋ Thêm học sinh</button>`, el => {
     const form = s => {
       s = s || { name: '', grade: '', note: '' };
@@ -844,7 +936,8 @@ function studentList() {
         <label>Trường học</label><input id="school" value="${h(s.school || '')}">
         <label>📍 Vị trí trường (để tra cứu)</label><div class="g2"><input id="schoolLat" placeholder="Vĩ độ" value="${h(s.schoolLat || '')}"><input id="schoolLng" placeholder="Kinh độ" value="${h(s.schoolLng || '')}"></div>
         <button class="btn o s" id="here" style="margin-top:6px">📍 Lấy vị trí hiện tại</button>
-        <label>Ghi chú</label><input id="note" value="${h(s.note || '')}"><div style="height:14px"></div><button class="btn p w" id="sv">Lưu</button>`, e2 => {
+        <label>Ghi chú</label><input id="note" value="${h(s.note || '')}"><div style="height:14px"></div><div class="row">${s.id ? '<button class="btn er" id="del">Xóa</button>' : ''}<button class="btn p f" id="sv">Lưu</button></div>`, e2 => {
+        const dl = e2.querySelector('#del'); if (dl) dl.onclick = async () => { if (!(await confirmBox(`Xóa học sinh <b>${h(s.name)}</b>? (Nếu đã có buổi học / thanh toán, chỉ ẩn để giữ lịch sử.)`, 'Xóa'))) return form(s); const r = await api('deleteStudent', { id: s.id }); if (!r.ok) return toast(r.error, 'er'); S.bill = null; await reload(); render(); studentList(); toast(r.archived ? 'Đã ẩn học sinh' : 'Đã xóa', 'ok'); };
         e2.querySelector('#here').onclick = async () => { const q = await getPos(); if (!q) return toast('Không lấy được vị trí', 'er'); e2.querySelector('#schoolLat').value = q.lat.toFixed(6); e2.querySelector('#schoolLng').value = q.lng.toFixed(6); };
         e2.querySelector('#sv').onclick = async () => { const r = await api('saveStudent', { student: { id: s.id, name: val(e2, 'name'), grade: val(e2, 'grade'), note: val(e2, 'note'), school: val(e2, 'school'), schoolLat: val(e2, 'schoolLat'), schoolLng: val(e2, 'schoolLng') } }); if (!r.ok) return toast(r.error, 'er'); await reload(); render(); studentList(); toast('Đã lưu', 'ok'); };
       });

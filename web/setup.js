@@ -138,32 +138,62 @@ function catForm(t, x) {
 function subjectList() { catList('subjects'); }
 
 /* ---------- Thời khóa biểu: chính khóa + học thêm ---------- */
-function ttManager(sid, d) {
+function ttManager(sid, d, pick) {
   const st = S.data.students; sid = sid || (st[0] || {}).id; d = d || HT.dow(today());
-  const items = dayItems(sid, d);
+  const items = dayItems(sid, d), sel = new Set();
+  const allCk = (S.data.timetable || []).filter(t => t.studentId === sid), dayCk = allCk.filter(t => +t.d === d);
   modal(`${head('🗓 Thời khóa biểu' + (st.length > 1 ? ' · ' + h(SN(sid)) : ''))}${dayChips(d, 'data-dd')}
-    <div class="list-a">${items.map((x, i) => `<div data-k="${i}"><span class="bar" style="background:${x.color};height:34px"></span><b style="width:92px">${x.start}–${x.end}</b><div class="f"><b>${h(x.title)}</b> <span class="chip" style="background:${x.kind === 'ck' ? '#e2e8f0' : '#ccfbf1'}">${x.kind === 'ck' ? 'Chính khóa' : 'Học thêm'}</span><div class="mu">${h([x.who, x.where].filter(Boolean).join(' · '))}</div></div>›</div>`).join('') || `<div class="empty">${WD[d]} chưa có lịch</div>`}</div>
-    <div style="height:10px"></div><div class="row"><button class="btn p f" id="nw">＋ Tiết chính khóa</button><button class="btn o f" id="nc">＋ Buổi học thêm</button></div>
-    ${d < 6 ? `<button class="btn o s w" id="cp" style="margin-top:8px">⧉ Chép lịch ${WD[d]} sang ngày khác…</button>` : ''}`, el => {
-    el.querySelectorAll('[data-dd]').forEach(b => b.onclick = () => ttManager(sid, +b.dataset.dd));
-    el.querySelectorAll('[data-k]').forEach(b => b.onclick = () => { const x = items[+b.dataset.k]; x.kind === 'ck' ? ttForm(x.t) : courseForm(x.c); });
-    el.querySelector('#nw').onclick = () => { const ck = items.filter(x => x.kind === 'ck'), last = ck[ck.length - 1], a = last ? HT.min(last.end) + 5 : 420; ttForm({ studentId: sid, d, start: HT.hhmm(a), end: HT.hhmm(a + 45) }); };
-    el.querySelector('#nc').onclick = () => courseList(sid);
-    const cp = el.querySelector('#cp'); if (cp) cp.onclick = () => {
-      const src = (S.data.timetable || []).filter(t => t.studentId === sid && +t.d === d);
+    <div class="list-a">${items.map((x, i) => `<div data-k="${i}">${pick ? `<input type="checkbox" class="pk" data-i="${i}">` : ''}<span class="bar" style="background:${x.color};height:34px"></span><b style="width:92px">${x.start}–${x.end}</b><div class="f"><b>${h(x.title)}</b> <span class="chip" style="background:${x.kind === 'ck' ? '#e2e8f0' : '#ccfbf1'}">${x.kind === 'ck' ? 'Chính khóa' : 'Học thêm'}</span><div class="mu">${h([x.who, x.where].filter(Boolean).join(' · '))}</div></div>${pick ? '' : `<button class="btn s o" data-rm="${i}" title="Xóa">🗑</button>`}</div>`).join('') || `<div class="empty">${WD[d]} chưa có lịch</div>`}</div>
+    <div style="height:10px"></div>
+    ${pick ? `<div class="row"><button class="btn o f" id="cancel">Hủy</button><button class="btn er f" id="delSel">🗑 Xóa mục đã chọn</button></div>`
+    : `<div class="row"><button class="btn p f" id="nw">＋ Tiết chính khóa</button><button class="btn o f" id="nc">＋ Buổi học thêm</button></div>
+    ${d < 6 ? `<button class="btn o s w" id="cp" style="margin-top:8px">⧉ Chép lịch ${WD[d]} sang ngày khác…</button>` : ''}
+    <details style="margin-top:10px"><summary class="mu sm" style="cursor:pointer">🗑 Xóa để thay đổi thời khóa biểu…</summary>
+      <div class="row wrap gap" style="margin-top:8px">${items.length ? '<button class="btn o s f" id="pick">☑ Chọn nhiều mục để xóa</button>' : ''}
+      ${dayCk.length ? `<button class="btn o s f" id="delDay">Xóa chính khóa ${WD[d]} (${dayCk.length})</button>` : ''}
+      ${allCk.length ? `<button class="btn er s w" id="delAll">Xóa toàn bộ TKB chính khóa (${allCk.length} tiết)</button>` : ''}</div>
+      <p class="mu sm">Lịch học thêm xóa từng buổi bằng 🗑, hoặc sửa trong Lớp học thêm. Buổi đã điểm danh và học phí không bị ảnh hưởng.</p></details>`}`, el => {
+    el.querySelectorAll('[data-dd]').forEach(b => b.onclick = () => ttManager(sid, +b.dataset.dd, pick));
+    el.querySelectorAll('[data-k]').forEach(b => b.onclick = e => {
+      if (e.target.closest('[data-rm]')) return;
+      if (pick) { const c = b.querySelector('.pk'); if (e.target !== c) c.checked = !c.checked; c.checked ? sel.add(+c.dataset.i) : sel.delete(+c.dataset.i); return; }
+      const x = items[+b.dataset.k]; x.kind === 'ck' ? ttForm(x.t) : courseForm(x.c);
+    });
+    el.querySelectorAll('[data-rm]').forEach(b => b.onclick = async () => { const x = items[+b.dataset.rm]; if (!(await confirmBox(`Xóa <b>${h(x.title)}</b> ${x.start}–${x.end} ${WD[d]}?`, 'Xóa'))) return ttManager(sid, d); delItems([x], d); ttManager(sid, d); });
+    const q = id => el.querySelector('#' + id), on = (id, f) => { const b = q(id); if (b) b.onclick = f; };
+    on('pick', () => ttManager(sid, d, true)); on('cancel', () => ttManager(sid, d));
+    on('delSel', async () => { if (!sel.size) return toast('Chưa chọn mục nào', 'er'); const L = [...sel].map(i => items[i]); if (!(await confirmBox(`Xóa ${L.length} mục đã chọn?`, 'Xóa'))) return ttManager(sid, d, true); delItems(L, d); toast('Đã xóa ' + L.length + ' mục', 'ok'); ttManager(sid, d); });
+    on('delDay', async () => { if (!(await confirmBox(`Xóa ${dayCk.length} tiết chính khóa ${WD[d]}?`, 'Xóa'))) return ttManager(sid, d); delCk(dayCk); ttManager(sid, d); });
+    on('delAll', async () => { if (!(await confirmBox(`Xóa <b>toàn bộ ${allCk.length} tiết</b> chính khóa của ${h(SN(sid))} để nhập thời khóa biểu mới?<br><span class="mu">Lịch học thêm, điểm danh và học phí giữ nguyên.</span>`, 'Xóa hết'))) return ttManager(sid, d); delCk(allCk); toast('Đã xóa thời khóa biểu chính khóa', 'ok'); ttManager(sid, d); });
+    on('nw', () => { const ck = items.filter(x => x.kind === 'ck'), last = ck[ck.length - 1], a = last ? HT.min(last.end) + 5 : 420; ttForm({ studentId: sid, d, start: HT.hhmm(a), end: HT.hhmm(a + 45) }); });
+    on('nc', () => courseList(sid));
+    on('cp', () => {
+      const src = dayCk;
       if (!src.length) return toast('Chưa có tiết chính khóa để chép', 'er');
       modal(`${head('Chép lịch ' + WD[d])}<p class="mu">Chọn các ngày nhận ${src.length} tiết (ghi đè lịch chính khóa ngày đó):</p>${chips([1, 2, 3, 4, 5, 6, 7].filter(x => x !== d).map(x => ({ v: String(x), t: WD[x] })), 'data-to')}
         <div style="height:12px"></div><button class="btn p w" id="go">Chép</button>`, e2 => {
-        const sel = new Set(); e2.querySelectorAll('[data-to]').forEach(b => b.onclick = () => { b.classList.toggle('on'); sel.has(b.dataset.to) ? sel.delete(b.dataset.to) : sel.add(b.dataset.to); });
+        const s2 = new Set(); e2.querySelectorAll('[data-to]').forEach(b => b.onclick = () => { b.classList.toggle('on'); s2.has(b.dataset.to) ? s2.delete(b.dataset.to) : s2.add(b.dataset.to); });
         e2.querySelector('#go').onclick = () => {
-          sel.forEach(dd => {
-            (S.data.timetable || []).filter(t => t.studentId === sid && +t.d === +dd).forEach(t => mut('deleteTT', { id: t.id }, () => drop('timetable', t.id)));
+          s2.forEach(dd => {
+            delCk((S.data.timetable || []).filter(t => t.studentId === sid && +t.d === +dd));
             src.forEach(t => { const x = Object.assign({}, t, { id: cid(), d: +dd }); mut('saveTT', { item: x }, () => upsert('timetable', x)); });
           });
           toast('Đã chép lịch', 'ok'); ttManager(sid, d);
         };
       });
-    };
+    });
+  });
+}
+/* Xóa tiết chính khóa (1 lần gọi máy chủ) */
+function delCk(list) { if (!list.length) return; const ids = list.map(t => t.id); mut('deleteTTMany', { ids }, () => { S.data.timetable = (S.data.timetable || []).filter(t => !ids.includes(t.id)); }); }
+/* Xóa mục trong danh sách ngày: chính khóa xóa tiết, học thêm bỏ buổi khỏi lịch của lớp */
+function delItems(L, d) {
+  delCk(L.filter(x => x.kind === 'ck').map(x => x.t));
+  const byC = {}; L.filter(x => x.kind === 'ht').forEach(x => (byC[x.c.id] = byC[x.c.id] || []).push(x.start));
+  Object.keys(byC).forEach(id => {
+    const c = S.data.courses.find(z => z.id === id); if (!c) return;
+    const x = Object.assign({}, c, { schedule: (c.schedule || []).filter(z => !(+z.d === d && byC[id].includes(z.t))), studentIds: HT.list(c.studentIds) });
+    mut('saveCourse', { course: x }, () => upsert('courses', Object.assign({}, x, { studentIds: x.studentIds.join(',') })));
   });
 }
 function ttForm(t) {

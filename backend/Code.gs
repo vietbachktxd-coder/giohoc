@@ -7,7 +7,7 @@
  * env = { db:{all,insert,update,remove}, now:()=>({date,time,iso,ms}), hash:(s)=>hex, uid:()=>string }
  * ========================================================================== */
 var HT = (function () {
-  var VERSION = '1.5.0';
+  var VERSION = '1.6.0';
 
   var SCHEMA = {
     users: ['id', 'tid', 'username', 'name', 'role', 'pass', 'studentId', 'courseIds', 'phone', 'active', 'mustChange', 'createdAt', 'prefs', 'fails', 'lockUntil'],
@@ -452,6 +452,12 @@ var HT = (function () {
       return { ok: true, item: t };
     }, ['ph']);
     A.deleteTT = secured(function (p, me) { var t = find('timetable', p.id); if (t) del('timetable', t); return { ok: true }; }, ['ph']);
+    /* Xóa nhiều tiết cùng lúc (ngày / cả tuần / đã chọn) để thay thời khóa biểu */
+    A.deleteTTMany = secured(function (p) {
+      var ids = p.ids || [], k = 0;
+      ids.forEach(function (id) { var t = find('timetable', id); if (t) { del('timetable', t); k++; } });
+      return { ok: true, count: k };
+    }, ['ph']);
 
     /* ---- Khoản thu chính khóa (học phí trường, bán trú, BHYT…) ---- */
     A.saveFee = secured(function (p) {

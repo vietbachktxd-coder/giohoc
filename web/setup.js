@@ -46,7 +46,7 @@ function chips(list, attr, sel) {
 /* ---------- TAB THIẾT LẬP: cây khai báo ---------- */
 function vSetup() {
   const D = S.data, n = x => (x || []).length;
-  const tree = (ic, t, sub, id, extra) => `<div class="tn" data-go="${id}" ${extra || ''}><span class="tl"></span><span>${ic}</span><div class="f"><b>${t}</b>${sub ? `<div class="mu">${sub}</div>` : ''}</div>›</div>`;
+  const tree = (ic, t, sub, id, extra) => `<div class="tn" data-go="${id}" ${extra || ''}><span class="tl"></span><span>${ic}</span><div class="f"><b>${t}</b>${sub ? `<div class="mu">${sub}</div>` : ''}</div><button class="btn s o" data-wipe="${id}" title="Xóa">🗑</button></div>`;
   let html = '';
   D.students.forEach(s => {
     const tt = (D.timetable || []).filter(t => t.studentId === s.id), cs = activeCourses().filter(c => HT.list(c.studentIds).includes(s.id));
@@ -65,6 +65,7 @@ function vSetup() {
   $('#v').innerHTML = html;
   document.querySelectorAll('[data-es]').forEach(b => b.onclick = e => { e.preventDefault(); studentForm(D.students.find(s => s.id === b.dataset.es)); });
   $('#addSt').onclick = () => studentForm({});
+  document.querySelectorAll('[data-wipe]').forEach(b => b.onclick = e => { e.stopPropagation(); wipe(b.dataset.wipe); });
   document.querySelectorAll('[data-go]').forEach(b => b.onclick = () => {
     const [k, id] = b.dataset.go.split(':');
     ({ tt: () => ttManager(id), co: () => courseList(id), fe: () => feeList(id), me: () => menuManager(), cat: () => catList(id) })[k]();
@@ -105,12 +106,13 @@ function catList(t) {
   const sub = x => t === 'dishes' ? HT.MEAL[x.meal] || '' : [x.teacher || x.subject, x.room || x.phone].filter(Boolean).join(' · ');
   const quick = t === 'subjects' ? SUBJ_DEF.filter(n => !L.some(x => x.name === n)).map(n => ({ v: n })) : t === 'dishes' ? [].concat(...Object.keys(DISH_DEF).map(m => DISH_DEF[m].filter(n => !L.some(x => x.name === n && x.meal === m)).map(n => ({ v: m + '|' + n, t: n })))) : [];
   modal(`${head(C0.title)}<input id="qf" placeholder="🔎 Tìm…" style="margin-bottom:6px">
-    <div class="list-a" id="cl">${L.map(x => `<div data-i="${x.id}"><b class="f">${h(x.name)}</b><span class="mu">${h(sub(x))}</span>›</div>`).join('') || '<div class="empty">Chưa có</div>'}</div>
+    <div class="list-a" id="cl">${L.map(x => `<div data-i="${x.id}"><b class="f">${h(x.name)}</b><span class="mu">${h(sub(x))}</span><button class="btn s o" data-del="${x.id}">🗑</button></div>`).join('') || '<div class="empty">Chưa có</div>'}</div>
     ${quick.length ? `<label>⚡ Bấm để thêm nhanh</label>${chips(quick.slice(0, 30), 'data-q')}` : ''}
     <div style="height:10px"></div><button class="btn p w" id="nw">＋ Thêm mới</button>`, el => {
     el.querySelector('#qf').oninput = e => { const k = e.target.value.toLowerCase(); el.querySelectorAll('#cl [data-i]').forEach(d => d.style.display = d.textContent.toLowerCase().includes(k) ? '' : 'none'); };
     el.querySelectorAll('[data-i]').forEach(d => d.onclick = () => catForm(t, L.find(x => x.id === d.dataset.i)));
     el.querySelector('#nw').onclick = () => catForm(t, {});
+    rowDel(el, '[data-del]', ds => { mut(C0.del, { table: t, id: ds.del }, () => drop(t, ds.del)); el.querySelector(`[data-i="${ds.del}"]`).remove(); });
     el.querySelectorAll('[data-q]').forEach(b => b.onclick = () => {
       const [a, nm] = b.dataset.q.includes('|') ? b.dataset.q.split('|') : ['', b.dataset.q];
       const x = t === 'dishes' ? { id: cid(), name: nm, meal: a } : { id: cid(), name: nm, teacher: '', room: '', color: COLORS[(S.data.subjects || []).length % COLORS.length], note: '' };
@@ -226,9 +228,12 @@ function menuManager(d) {
   d = d || HT.dow(today());
   const L = (S.data.menus || []).filter(m => +m.d === d);
   modal(`${head('🍱 Thực đơn')}${dayChips(d, 'data-dd')}<div class="list-a">${Object.keys(HT.MEAL).map(k => { const m = L.filter(z => z.meal === k);
-    return `<div data-ml="${k}"><b style="width:84px">${HT.MEAL[k]}</b><span class="f ${m.length ? '' : 'mu'}">${m.length ? m.map(z => h(z.dishes)).join('; ') : 'Bấm để chọn món'}</span>›</div>`; }).join('')}</div>
+    return `<div data-ml="${k}"><b style="width:84px">${HT.MEAL[k]}</b><span class="f ${m.length ? '' : 'mu'}">${m.length ? m.map(z => h(z.dishes)).join('; ') : 'Bấm để chọn món'}</span>${m.length ? `<button class="btn s o" data-del="${k}">🗑</button>` : '›'}</div>`; }).join('')}</div>
+    ${L.length ? `<button class="btn o s w" id="clrDay">🗑 Xóa thực đơn ${WD[d]}</button>` : ''}
     <p class="mu sm">Bấm vào từng bữa để chọn món nhanh từ danh mục. Món mới tự lưu vào danh mục.</p>`, el => {
     el.querySelectorAll('[data-dd]').forEach(b => b.onclick = () => menuManager(+b.dataset.dd));
+    rowDel(el, '[data-del]', ds => { L.filter(z => z.meal === ds.del).forEach(z => mut('deleteMenu', { id: z.id }, () => drop('menus', z.id))); menuManager(d); });
+    const cd = el.querySelector('#clrDay'); if (cd) cd.onclick = async () => { if (!(await confirmBox(`Xóa thực đơn ${WD[d]}?`, 'Xóa'))) return menuManager(d); L.forEach(z => mut('deleteMenu', { id: z.id }, () => drop('menus', z.id))); menuManager(d); };
     el.querySelectorAll('[data-ml]').forEach(b => b.onclick = () => { const k = b.dataset.ml; menuForm(L.find(z => z.meal === k) || { d, meal: k, studentId: '' }); });
   });
 }
@@ -262,11 +267,12 @@ function menuForm(m) {
 function feeList(sid) {
   const L = (S.data.schoolfees || []).filter(f => isT(f.active) && (!sid || f.studentId === sid));
   modal(`${head('💵 Học phí chính khóa' + (sid && multiStudent() ? ' · ' + h(SN(sid)) : ''))}
-    <div class="list-a">${L.map(f => `<div data-f="${f.id}"><div class="f"><b>${h(f.name)}</b><div class="mu">${CYCLE[f.cycle]} · từ ${f.from.slice(5)}/${f.from.slice(0, 4)}${f.to ? ' đến ' + f.to.slice(5) + '/' + f.to.slice(0, 4) : ''}</div></div><b>${money(f.amount)}</b>›</div>`).join('') || '<div class="empty">Chưa có khoản thu</div>'}</div>
+    <div class="list-a">${L.map(f => `<div data-f="${f.id}"><div class="f"><b>${h(f.name)}</b><div class="mu">${CYCLE[f.cycle]} · từ ${f.from.slice(5)}/${f.from.slice(0, 4)}${f.to ? ' đến ' + f.to.slice(5) + '/' + f.to.slice(0, 4) : ''}</div></div><b>${money(f.amount)}</b><button class="btn s o" data-del="${f.id}">🗑</button></div>`).join('') || '<div class="empty">Chưa có khoản thu</div>'}</div>
     <label>⚡ Thêm nhanh</label>${chips(['Học phí', 'Tiền bán trú', 'Tiền ăn', 'BHYT', 'Đồng phục', 'Sách giáo khoa', 'Quỹ phụ huynh'].filter(n => !L.some(f => f.name === n)).map(n => ({ v: n })), 'data-q')}
     <div style="height:10px"></div><button class="btn p w" id="nw">＋ Khoản thu khác</button>`, el => {
     el.querySelectorAll('[data-f]').forEach(b => b.onclick = () => feeForm(L.find(f => f.id === b.dataset.f)));
     el.querySelector('#nw').onclick = () => feeForm({ studentId: sid });
+    rowDel(el, '[data-del]', async ds => { const f = L.find(x => x.id === ds.del); if (!(await confirmBox(`Xóa khoản <b>${h(f.name)}</b>?`, 'Xóa'))) return feeList(sid); mut('deleteFee', { id: f.id }, () => drop('schoolfees', f.id)); render(); feeList(sid); });
     el.querySelectorAll('[data-q]').forEach(b => b.onclick = () => feeForm({ studentId: sid, name: b.dataset.q, cycle: b.dataset.q === 'BHYT' || b.dataset.q.startsWith('Sách') || b.dataset.q === 'Đồng phục' ? 'nam' : 'thang' }));
   });
 }
@@ -284,6 +290,37 @@ function feeForm(f) {
       mut('saveFee', { item: x }, () => upsert('schoolfees', x)); feeList(x.studentId);
     };
     const d = el.querySelector('#del'); if (d) d.onclick = () => { mut('deleteFee', { id: f.id }, () => drop('schoolfees', f.id)); feeList(f.studentId); };
+  });
+}
+
+/* ---------- Xóa nhanh từ màn hình Thiết lập ---------- */
+function dropCourseFor(c, sid) {
+  const ids = HT.list(c.studentIds);
+  if (sid && ids.length > 1) { const x = Object.assign({}, c, { studentIds: ids.filter(i => i !== sid) }); mut('saveCourse', { course: x }, () => upsert('courses', Object.assign({}, x, { studentIds: x.studentIds.join(',') }))); }
+  else mut('deleteCourse', { id: c.id }, () => upsert('courses', { id: c.id, active: '0' }));
+}
+async function wipe(key) {
+  const [k, id] = key.split(':'), D = S.data, nm = h(SN(id));
+  const J = {
+    tt: () => { const L = (D.timetable || []).filter(t => t.studentId === id); return [L.length, `toàn bộ <b>${L.length} tiết chính khóa</b> của ${nm}`, () => delCk(L)]; },
+    co: () => { const L = activeCourses().filter(c => HT.list(c.studentIds).includes(id)); return [L.length, `<b>${L.length} lớp học thêm</b> của ${nm} (lớp đã có buổi học được chuyển sang Ngừng để giữ lịch sử)`, () => L.forEach(c => dropCourseFor(c, id))]; },
+    fe: () => { const L = (D.schoolfees || []).filter(f => f.studentId === id && isT(f.active)); return [L.length, `<b>${L.length} khoản học phí chính khóa</b> của ${nm}`, () => L.forEach(f => mut('deleteFee', { id: f.id }, () => drop('schoolfees', f.id)))]; },
+    me: () => { const L = D.menus || []; return [L.length, `<b>toàn bộ thực đơn</b> (${L.length} bữa)`, () => L.forEach(m => mut('deleteMenu', { id: m.id }, () => drop('menus', m.id)))]; },
+    cat: () => { const L = D[id] || []; return [L.length, `<b>toàn bộ danh mục ${CATS[id].title.slice(2)}</b> (${L.length} mục)`, () => L.forEach(x => mut(CATS[id].del, { table: id, id: x.id }, () => drop(id, x.id)))]; }
+  }[k]();
+  if (!J[0]) return toast('Không có dữ liệu để xóa');
+  if (!(await confirmBox('Xóa ' + J[1] + '?<br><span class="mu">Buổi đã điểm danh và tiền đã nộp không bị ảnh hưởng.</span>', 'Xóa hết'))) return;
+  J[2](); toast('Đã xóa', 'ok'); render();
+}
+function rowDel(el, sel, fn) { el.querySelectorAll(sel).forEach(b => b.onclick = async e => { e.stopPropagation(); await fn(b.dataset); }); }
+function courseList(sid) {
+  S.cSid = sid || '';
+  const L = S.data.courses.filter(c => isT(c.active) && (!sid || HT.list(c.studentIds).includes(sid)));
+  modal(`${head('📚 Lớp học thêm')}<div class="list-a">${L.map(c => `<div data-c="${c.id}"><span class="bar" style="background:${c.color};height:34px"></span><div class="f"><b>${h(c.name)}</b><div class="mu">${h(c.teacher || '')} · ${modeText(c)}<br>${(c.schedule || []).map(z => WDS[z.d] + ' ' + z.t).join(', ') || 'Chưa có lịch'}</div></div><button class="btn s o" data-del="${c.id}">🗑</button></div>`).join('') || '<div class="empty">Chưa có lớp học thêm</div>'}</div>
+    <div style="height:10px"></div><button class="btn p w" id="nw">＋ Thêm lớp học</button>`, el => {
+    el.querySelectorAll('[data-c]').forEach(d => d.onclick = () => courseForm(S.data.courses.find(c => c.id === d.dataset.c)));
+    el.querySelector('#nw').onclick = () => courseForm(null);
+    rowDel(el, '[data-del]', async ds => { const c = L.find(x => x.id === ds.del); if (!(await confirmBox(`Xóa lớp <b>${h(c.name)}</b>?`, 'Xóa'))) return courseList(sid); dropCourseFor(c, sid); render(); courseList(sid); });
   });
 }
 

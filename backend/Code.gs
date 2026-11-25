@@ -7,7 +7,7 @@
  * env = { db:{all,insert,update,remove}, now:()=>({date,time,iso,ms}), hash:(s)=>hex, uid:()=>string }
  * ========================================================================== */
 var HT = (function () {
-  var VERSION = '1.6.0';
+  var VERSION = '2.0.0';
 
   var SCHEMA = {
     users: ['id', 'tid', 'username', 'name', 'role', 'pass', 'studentId', 'courseIds', 'phone', 'active', 'mustChange', 'createdAt', 'prefs', 'fails', 'lockUntil'],
@@ -624,8 +624,42 @@ function cell(v) {
   return v === null || v === undefined ? '' : v;
 }
 
+/* ---- Bộ nhớ đệm máy chủ (CacheService): đọc nhanh, tự làm mới khi có thay đổi ---- */
+var CACHE = CacheService.getScriptCache(), MEM = {}, VER = {}, CK = 'gh3:', CHUNK = 30000, TTL = 1800;
+function cacheLoad(tables) {
+  try {
+    var keys = []; tables.forEach(function (t) { keys.push(CK + 'm:' + t, CK + 'v:' + t); });
+    var got = CACHE.getAll(keys), need = [], meta = {};
+    tables.forEach(function (t) {
+      VER[t] = got[CK + 'v:' + t] || '0';
+      var m = got[CK + 'm:' + t]; if (!m) return; m = JSON.parse(m);
+      if (String(m.v) !== String(VER[t])) return;
+      meta[t] = m; for (var i = 0; i < m.n; i++) need.push(CK + 'c:' + t + ':' + i);
+    });
+    if (!need.length) return;
+    var ch = CACHE.getAll(need);
+    Object.keys(meta).forEach(function (t) {
+      var str = ''; for (var i = 0; i < meta[t].n; i++) { var c = ch[CK + 'c:' + t + ':' + i]; if (c == null) return; str += c; }
+      MEM[t] = JSON.parse(str);
+    });
+  } catch (e) { }
+}
+function cachePut(t, rows, ver) {
+  try {
+    var str = JSON.stringify(rows), n = Math.ceil(str.length / CHUNK) || 1; if (n > 60) return;
+    var o = {}; for (var i = 0; i < n; i++) o[CK + 'c:' + t + ':' + i] = str.substr(i * CHUNK, CHUNK);
+    o[CK + 'm:' + t] = JSON.stringify({ n: n, v: ver });
+    CACHE.putAll(o, TTL);
+  } catch (e) { }
+}
+function cacheBump(t) { delete MEM[t]; try { CACHE.put(CK + 'v:' + t, String(Date.now()) + Math.random().toString(36).slice(2, 6), TTL); CACHE.remove(CK + 'm:' + t); } catch (e) { } }
+
 var DB = {
   all: function (t) {
+    if (MEM[t]) return MEM[t].map(function (o) { var c = {}; for (var k in o) c[k] = o[k]; return c; });
+    var ver = VER[t] || '0', rows = DB.read(t); cachePut(t, rows, ver); return rows;
+  },
+  read: function (t) {
     var s = sh(t), n = s.getLastRow(); if (n < 2) return [];
     var v = s.getRange(1, 1, n, s.getLastColumn()).getValues(), h = v[0], out = [];
     for (var i = 1; i < v.length; i++) {
@@ -639,6 +673,7 @@ var DB = {
     var s = sh(t), h = s.getRange(1, 1, 1, s.getLastColumn()).getValues()[0];
     var row = h.map(function (k) { var v = o[k]; return v === undefined || v === null ? '' : (typeof v === 'object' ? JSON.stringify(v) : String(v)); });
     s.getRange(s.getLastRow() + 1, 1, 1, row.length).setNumberFormat('@').setValues([row]);
+    cacheBump(t);
   },
   rowOf: function (t, id, key) {
     var s = sh(t), h = s.getRange(1, 1, 1, s.getLastColumn()).getValues()[0], c = h.indexOf(key || 'id') + 1, n = s.getLastRow();
@@ -652,8 +687,9 @@ var DB = {
     var rg = x.s.getRange(x.r, 1, 1, x.h.length), row = rg.getValues()[0];
     for (var k in patch) { var j = x.h.indexOf(k); if (j >= 0) { var v = patch[k]; row[j] = v === undefined || v === null ? '' : (typeof v === 'object' ? JSON.stringify(v) : String(v)); } }
     rg.setNumberFormat('@').setValues([row]);
+    cacheBump(t);
   },
-  remove: function (t, id, key) { var x = DB.rowOf(t, id, key); if (x.r > 0) x.s.deleteRow(x.r); }
+  remove: function (t, id, key) { var x = DB.rowOf(t, id, key); if (x.r > 0) { x.s.deleteRow(x.r); cacheBump(t); } }
 };
 
 function envGas() {
@@ -673,6 +709,7 @@ function envGas() {
 
 function out(o) { return ContentService.createTextOutput(JSON.stringify(o)).setMimeType(ContentService.MimeType.JSON); }
 function run(p) {
+  cacheLoad(Object.keys(HT.SCHEMA));
   var READ = { ping: 1, load: 1, bill: 1, summary: 1, notifs: 1, backup: 1 };
   if (READ[p.action]) return HT.create(envGas()).handle(p);
   var lock = LockService.getScriptLock();
@@ -685,6 +722,7 @@ function doPost(e) { var p = {}; try { p = JSON.parse(e.postData.contents); } ca
 /** Chạy 1 lần khi cài đặt: tạo file dữ liệu, các trang tính và tài khoản admin / 123456 */
 function setup() {
   Object.keys(HT.SCHEMA).forEach(sheetOf);
+  Object.keys(HT.SCHEMA).forEach(cacheBump);
   var ss = book(), d = ss.getSheetByName('Sheet1') || ss.getSheetByName('Trang tính1');
   if (d && ss.getSheets().length > 1) ss.deleteSheet(d);
   var created = HT.create(envGas()).seed();

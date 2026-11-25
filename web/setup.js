@@ -13,19 +13,23 @@ function upsert(t, item) {
 function drop(t, id) { S.data[t] = (S.data[t] || []).filter(x => x.id !== id); }
 function mut(action, params, local) {
   if (local) local();
-  Q.push({ action, params }); syncBadge(); runQ();
+  Q.push({ action, params }); saveQ(); syncBadge(); runQ();
 }
 async function runQ() {
   if (qBusy) return; qBusy = true; syncBadge();
   while (Q.length) {
     const r = await api(Q[0].action, Q[0].params);
-    if (!r.ok) { toast('Chưa lưu được: ' + r.error, 'er'); Q.length = 0; await reload(true); if (!$('#modal').innerHTML) render(); break; }
-    Q.shift(); syncBadge();
+    if (!r.ok && /mạng|kết nối/i.test(r.error || '')) { saveQ(); qBusy = false; syncBadge(); toast('📴 Mất mạng — đã lưu tạm trên máy, sẽ tự gửi khi có mạng'); setTimeout(runQ, 30000); return; }
+    if (!r.ok) { toast('Chưa lưu được: ' + r.error, 'er'); Q.length = 0; saveQ(); await reload(true); if (!$('#modal').innerHTML) render(); break; }
+    Q.shift(); saveQ(); syncBadge();
   }
   qBusy = false; syncBadge(); S.bill = S.sum = null;
   clearTimeout(syncT);
   syncT = setTimeout(async () => { if (!Q.length && await reload(true) && !$('#modal').innerHTML) render(); }, 3000);
 }
+function saveQ() { try { LS.set('queue', Q); } catch (e) { } }
+(LS.get('queue', []) || []).forEach(j => Q.push(j));
+window.addEventListener('online', () => runQ());
 window.addEventListener('beforeunload', e => { if (Q.length || qBusy) { e.preventDefault(); e.returnValue = ''; } });
 
 /* ---------- Số tiền có dấu chấm ---------- */
@@ -324,5 +328,3 @@ function courseList(sid) {
   });
 }
 
-/* Khởi động */
-if (S.token && S.me) start(); else viewLogin();

@@ -67,3 +67,23 @@ details.card:not([open])>summary::after{content:'▸';margin-left:auto;color:var
 .tree summary{padding-bottom:6px}.tn{display:flex;align-items:center;gap:10px;padding:10px 4px 10px 22px;position:relative;cursor:pointer;border-top:1px solid var(--bd)}
 .tn .tl{position:absolute;left:8px;top:0;bottom:50%;width:10px;border-left:2px solid #cbd5e1;border-bottom:2px solid #cbd5e1;border-bottom-left-radius:6px}
 .tn:hover{background:#f8fafc}
+
+/* ---- 2.0: hiện đại ---- */
+#v.fade{animation:fd .22s ease-out}@keyframes fd{from{opacity:.3;transform:translateY(6px)}}
+.btn{transition:transform .08s,filter .15s}.btn:active{transform:scale(.96);filter:brightness(.95)}
+.card{transition:box-shadow .2s}
+#fab{position:fixed;right:18px;bottom:calc(78px + env(safe-area-inset-bottom));width:58px;height:58px;border-radius:50%;border:0;background:linear-gradient(135deg,#0f766e,#14b8a6);color:#fff;font-size:30px;box-shadow:0 6px 18px #0f766e66;z-index:7}
+#fab:active{transform:scale(.92)}
+.hero{background:linear-gradient(135deg,#0f766e,#14b8a6);color:#fff}.hero .btn{background:#fff;color:#0f766e}
+.hero.soon{background:linear-gradient(135deg,#ea580c,#f59e0b)}.hero.soon .btn{color:#c2410c}
+nav{backdrop-filter:blur(10px);background:#ffffffee}
+:root[data-theme=dark]{--bg:#0b1513;--card:#13211f;--tx:#e2e8f0;--mu:#94a3b8;--bd:#24403b}
+:root[data-theme=dark] body{background:var(--bg);color:var(--tx)}
+:root[data-theme=dark] .card,:root[data-theme=dark] .kpi div,:root[data-theme=dark] #modal .sh,:root[data-theme=dark] .cal .d,:root[data-theme=dark] .qk button,:root[data-theme=dark] .tabs button,:root[data-theme=dark] .btn.o{background:var(--card);color:var(--tx);border-color:var(--bd)}
+:root[data-theme=dark] nav{background:#0f1c1aee;border-color:var(--bd)}
+:root[data-theme=dark] input,:root[data-theme=dark] select,:root[data-theme=dark] textarea{background:#0f1c1a;color:var(--tx);border-color:#2c4a44}
+:root[data-theme=dark] .btn{background:#1f3330;color:var(--tx)}:root[data-theme=dark] .btn.p,:root[data-theme=dark] .tabs button.on,:root[data-theme=dark] .qk button.on{background:#0d9488;color:#fff}
+:root[data-theme=dark] .btn.ok{background:#15803d;color:#fff}:root[data-theme=dark] .btn.er{background:#b91c1c;color:#fff}
+:root[data-theme=dark] .warn{background:#3b2410;color:#fdba74}:root[data-theme=dark] .info{background:#0f2e2a;color:#5eead4}
+:root[data-theme=dark] .live{background:#102825}:root[data-theme=dark] .chip{filter:brightness(.85)}
+:root[data-theme=dark] .tn:hover{background:#18302c}:root[data-theme=dark] .hero .btn{background:#fff;color:#0f766e}

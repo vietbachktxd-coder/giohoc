@@ -194,6 +194,30 @@ public class Bridge {
         }
     }
 
+    /* ---------- Chia sẻ ảnh (phiếu học phí) qua Zalo… ---------- */
+    @JavascriptInterface
+    public String shareImage(String name, String base64, String text) {
+        try {
+            if (Build.VERSION.SDK_INT < 29) return "ERR:Máy Android quá cũ";
+            byte[] data = Base64.decode(base64, Base64.DEFAULT);
+            ContentValues cv = new ContentValues();
+            cv.put(MediaStore.MediaColumns.DISPLAY_NAME, name);
+            cv.put(MediaStore.MediaColumns.MIME_TYPE, "image/png");
+            cv.put(MediaStore.MediaColumns.RELATIVE_PATH, Environment.DIRECTORY_PICTURES + "/GioHoc");
+            Uri u = act.getContentResolver().insert(MediaStore.Images.Media.EXTERNAL_CONTENT_URI, cv);
+            if (u == null) return "ERR:Không tạo được ảnh";
+            try (OutputStream os = act.getContentResolver().openOutputStream(u)) { os.write(data); }
+            act.runOnUiThread(() -> {
+                try {
+                    Intent i = new Intent(Intent.ACTION_SEND).setType("image/png").putExtra(Intent.EXTRA_STREAM, u)
+                        .putExtra(Intent.EXTRA_TEXT, text).addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION);
+                    act.startActivity(Intent.createChooser(i, "Gửi phiếu học phí"));
+                } catch (Exception ignored) { }
+            });
+            return "OK";
+        } catch (Exception e) { return "ERR:" + e.getMessage(); }
+    }
+
     /* ---------- Khác ---------- */
     @JavascriptInterface
     public void checkUpdate(boolean manual) { Updater.check(act, manual); }

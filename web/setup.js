@@ -185,7 +185,7 @@ function ttManager(sid, d, pick) {
   });
 }
 /* Xóa tiết chính khóa (1 lần gọi máy chủ) */
-function delCk(list) { if (!list.length) return; const ids = list.map(t => t.id); mut('deleteTTMany', { ids }, () => { S.data.timetable = (S.data.timetable || []).filter(t => !ids.includes(t.id)); }); }
+function delCk(list) { list.forEach(t => mut('deleteTT', { id: t.id }, () => drop('timetable', t.id))); }
 /* Xóa mục trong danh sách ngày: chính khóa xóa tiết, học thêm bỏ buổi khỏi lịch của lớp */
 function delItems(L, d) {
   delCk(L.filter(x => x.kind === 'ck').map(x => x.t));

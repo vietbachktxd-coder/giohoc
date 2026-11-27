@@ -57,8 +57,20 @@ final class Updater {
         }).start();
     }
 
+    /** Tự cài không cần bấm chỉ khi chính app là "nguồn cài đặt" của nó (Android 12+).
+     *  App cài lần đầu từ trình duyệt / Tệp thì lần cập nhật đầu tiên phải bấm xác nhận 1 lần. */
+    static boolean selfInstaller(Context c) {
+        try {
+            if (Build.VERSION.SDK_INT >= 30) {
+                String who = c.getPackageManager().getInstallSourceInfo(c.getPackageName()).getInstallingPackageName();
+                return c.getPackageName().equals(who);
+            }
+        } catch (Exception ignored) { }
+        return false;
+    }
+
     static boolean canSilent(Context c) {
-        return Build.VERSION.SDK_INT >= 31 && c.getPackageManager().canRequestPackageInstalls();
+        return Build.VERSION.SDK_INT >= 31 && c.getPackageManager().canRequestPackageInstalls() && selfInstaller(c);
     }
 
     static void start(MainActivity a, JSONObject j) {
@@ -81,14 +93,17 @@ final class Updater {
     }
 
     /** Tải APK và đưa vào trình cài đặt hệ thống. Android 12+ cài đè tự động không cần bấm. */
-    static void install(Context ctx, String url) throws Exception {
+    static void install(Context ctx, String url) throws Exception { Prefs.get(ctx).edit().putBoolean("needConfirm", false).apply(); install(ctx, url, false); }
+
+    static void install(Context ctx, String url, boolean confirm) throws Exception {
         if (busy) return;
         busy = true;
         try {
             PackageInstaller pi = ctx.getPackageManager().getPackageInstaller();
             PackageInstaller.SessionParams sp = new PackageInstaller.SessionParams(PackageInstaller.SessionParams.MODE_FULL_INSTALL);
             sp.setAppPackageName(ctx.getPackageName());
-            if (Build.VERSION.SDK_INT >= 31) sp.setRequireUserAction(PackageInstaller.SessionParams.USER_ACTION_NOT_REQUIRED);
+            if (Build.VERSION.SDK_INT >= 31) sp.setRequireUserAction(!confirm && canSilent(ctx) ? PackageInstaller.SessionParams.USER_ACTION_NOT_REQUIRED : PackageInstaller.SessionParams.USER_ACTION_REQUIRED);
+            Prefs.get(ctx).edit().putString("updUrl", url).apply();
             int id = pi.createSession(sp);
             PackageInstaller.Session s = pi.openSession(id);
             try {
